@@ -48,7 +48,19 @@ These reflect the current design direction from the evaluation of `propunere1.md
 
 `qwen2.5:7b` (and similar small models) have two known quirks when used via LiteLLM tool-calling:
 
-1. **Too many tools causes hallucination.** With 21 Playwright MCP tools exposed, the model ignores them and invents a fake answer. Fix: `_mcp_to_openai_tools(slim=True)` filters to 8 essential tools (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_press_key`, `browser_wait_for`, `browser_select_option`). Activated automatically when `config.provider == "ollama"`.
+1. **Too many tools causes hallucination.** With 21 Playwright MCP tools exposed, the model ignores them and invents a fake answer. Fix: `_mcp_to_openai_tools(slim=True)` filters to 8 essential tools (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_press_key`, `browser_wait_for`, `browser_select_option`). 
+   - **Default behavior (auto-detect):** Slim mode activated only for Ollama provider
+   - **Override with `QA_FORCE_SLIM` env var:**
+     ```bash
+     QA_FORCE_SLIM=true   # Force slim mode (all 8 tools) for any provider
+     QA_FORCE_SLIM=false  # Force full mode (all 21 tools) for Ollama with capable models
+     # Not set → auto-detect: Ollama=slim, others=full
+     ```
+   - **When to use `QA_FORCE_SLIM=false` (Ollama with GPU models):**
+     ```bash
+     QA_EXECUTOR_PROVIDER=ollama QA_EXECUTOR_MODEL=llama3.1:8b QA_FORCE_SLIM=false uv run qa-agent
+     # llama3.1:8b on GPU is capable enough for full 21-tool set
+     ```
 
 2. **Ghost tool calls / serialized JSON output.** After receiving a tool result, the model sometimes outputs a tool call as plain-text JSON in `message.content` instead of as a structured `tool_calls` entry. Two fallbacks handle this:
    - **Fallback-A:** if `content` is valid JSON with `status` + `actual` keys → treat it as a `report_result` call.

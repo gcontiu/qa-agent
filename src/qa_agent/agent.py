@@ -168,8 +168,14 @@ async def run_requirement(
             await session.initialize()
 
             mcp_tools = await session.list_tools()
-            slim = config.provider == "ollama"
+            # Determine slim mode: explicit override > auto-detect
+            if config.force_slim is not None:
+                slim = config.force_slim
+            else:
+                slim = config.provider == "ollama"  # auto: only Ollama defaults to slim
             all_tools = _mcp_to_openai_tools(mcp_tools, slim=slim) + [_REPORT_TOOL]
+            num_tools = len(all_tools) - 1  # exclude report_result
+            console.print(f"[dim]Tools: {num_tools}/21 ({'slim' if slim else 'full'})[/dim]")
 
             messages: list[dict] = [
                 {"role": "system", "content": _system_prompt()},

@@ -42,6 +42,7 @@ class LLMConfig:
     base_url: str = "http://localhost:11434"  # Ollama default
     role: str = "executor"
     llm_timeout: int = 30            # per-call HTTP timeout in seconds (QA_LLM_TIMEOUT)
+    force_slim: bool | None = None   # True=slim mode, False=full tools, None=auto (QA_FORCE_SLIM)
 
     @classmethod
     def from_env(cls, role: str = "executor") -> "LLMConfig":
@@ -52,7 +53,17 @@ class LLMConfig:
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         default_timeout = _LLM_TIMEOUT_DEFAULTS.get(provider, 30)
         llm_timeout = int(os.getenv("QA_LLM_TIMEOUT", default_timeout))
-        return cls(provider=provider, model=model, base_url=base_url, role=role, llm_timeout=llm_timeout)
+        # force_slim: None=auto (based on provider), True=always slim, False=always full
+        force_slim_str = os.getenv("QA_FORCE_SLIM", "").lower()
+        force_slim = {"true": True, "false": False}.get(force_slim_str, None)
+        return cls(
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            role=role,
+            llm_timeout=llm_timeout,
+            force_slim=force_slim,
+        )
 
     def resolved_model(self) -> str:
         if self.model:

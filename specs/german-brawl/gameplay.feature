@@ -36,3 +36,8 @@ Feature: German Brawl — Core Gameplay
     Then the game mode options are shown
     And DE to RO mode option is visible
     And RO to DE mode option is visible
+
+  @id:GB-006 @priority:low
+  Scenario: Daily Reward button is visible in lobby
+    Given the app is loaded
+    Then a Daily Reward button or notification is visible in the lobby

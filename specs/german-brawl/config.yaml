@@ -1,0 +1,23 @@
+meta:
+  name: "German Brawl"
+  version: "1.0"
+  target:
+    type: web
+    environments:
+      prod:
+        url: https://german-brawl.vercel.app/
+      local:
+        url: http://localhost:3000
+    default_environment: prod
+    browser: chromium
+    viewport:
+      width: 1280
+      height: 720
+
+context: |
+  German Brawl is a Brawl Stars-inspired Progressive Web App for learning German
+  vocabulary from the "Fit in Deutsch 1" textbook. The app has a Lobby (main hub)
+  with a large yellow PLAY button, navigation buttons (Shop, Brawlers, GAMEMODES,
+  Quest), a Brawl Pass progress bar, and resource counters (Coins, Gems, Bling,
+  Power Points, Credits). Clicking PLAY starts a battle where the player translates
+  German or Romanian words within a 20-second timer. State is stored in localStorage.

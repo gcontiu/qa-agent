@@ -117,13 +117,21 @@ async def run_requirement(req: dict, url: str) -> dict:
             start = time.monotonic()
 
             for turn in range(MAX_TURNS):
-                response = client.messages.create(
-                    model=MODEL,
-                    max_tokens=2048,
-                    system=_system_prompt(),
-                    tools=all_tools,
-                    messages=messages,
-                )
+                try:
+                    response = client.messages.create(
+                        model=MODEL,
+                        max_tokens=2048,
+                        system=_system_prompt(),
+                        tools=all_tools,
+                        messages=messages,
+                    )
+                except anthropic.APIError as e:
+                    verdict = {
+                        "status": "error",
+                        "actual": f"API error: {e}",
+                        "reasoning": str(e),
+                    }
+                    break
                 messages.append({"role": "assistant", "content": response.content})
 
                 if response.stop_reason == "end_turn":

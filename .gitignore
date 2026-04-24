@@ -8,6 +8,7 @@ reports/*
 !reports/.gitkeep
 .state/
 node_modules/
+.playwright-mcp/
 dist/
 *.egg-info/
 .pytest_cache/

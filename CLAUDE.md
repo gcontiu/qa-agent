@@ -2,14 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project status
+## Commands
 
-**This repository is in the design/planning phase — there is no code yet.** Only two documents exist:
+```bash
+# Setup (first time)
+bash scripts/install.sh
 
-- `qa-agent-spec.md` — original brief (Romanian): build a spec-driven automated testing agent that is *agnostic* of the system under test. The agent reads specifications from one or more files, plans a test strategy, executes tests independently, and emits a human-friendly report that a separate fix-agent can consume.
-- `propunere1.md` — initial architecture proposal with 3 options (A: Claude Code headless + Playwright MCP, B: custom Python + Anthropic SDK + Playwright, C: hybrid with Auto Playwright/ZeroStep).
+# Smoke test — validates Agent SDK + Playwright MCP chain
+uv run python -m qa_agent.smoke [url]
 
-When code starts landing, update this file with real build/test/lint commands and remove this status section.
+# Run executor on hardcoded requirement GB-001 (iteration 1)
+uv run python -m qa_agent.agent
+```
+
+`uv` manages the Python 3.12 virtualenv automatically. No manual `pip install` needed.
 
 ## Goal
 
@@ -66,3 +72,4 @@ qa-agent/
 - **Language:** Romanian is fine in user-facing conversation and commit messages; code, identifiers, and spec keywords stay English.
 - **Spec IDs:** Requirements carry stable IDs (e.g. `GP-001`). IDs live in Gherkin tags (`@id:GP-001`) or YAML `id:` fields. The state store keys off these — do not rename them lightly.
 - **Evidence paths:** Always relative to the run directory so reports are portable.
+- [Token estimate before starting tasks] Estimate cost before every taskl ask scoping questions if > 2000 tokens before doing any work

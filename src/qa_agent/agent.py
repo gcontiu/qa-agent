@@ -6,6 +6,7 @@ Usage: uv run python -m qa_agent.agent
 """
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 
@@ -127,13 +128,25 @@ def _user_message(req: dict, url: str) -> str:
 # Main executor
 # ---------------------------------------------------------------------------
 
+_TEST_TIMEOUT_DEFAULTS = {"ollama": 360, "anthropic": None}
+
+
 async def run_requirement(
     req: dict,
     url: str,
     config: LLMConfig | None = None,
+    test_timeout: int | None = ...,  # type: ignore[assignment]
 ) -> dict:
     if config is None:
         config = LLMConfig.from_env(role="executor")
+
+    # Sentinel ... means "use provider default"; None means "no cap"
+    if test_timeout is ...:  # type: ignore[comparison-overlap]
+        env_val = os.getenv("QA_TEST_TIMEOUT")
+        if env_val is not None:
+            test_timeout = int(env_val)
+        else:
+            test_timeout = _TEST_TIMEOUT_DEFAULTS.get(config.provider)
 
     console = Console()
     console.rule(
@@ -168,6 +181,15 @@ async def run_requirement(
             start = time.monotonic()
 
             for turn in range(MAX_TURNS):
+                if test_timeout and (time.monotonic() - start) >= test_timeout:
+                    console.print(f"[red]Test timeout ({test_timeout}s) exceeded[/red]")
+                    verdict = {
+                        "status": "fail",
+                        "actual": "Test did not complete within the time limit",
+                        "reasoning": f"test_timeout={test_timeout}s exceeded after {turn} turns",
+                    }
+                    break
+
                 try:
                     response = complete(config, messages, tools=all_tools)
                 except Exception as e:

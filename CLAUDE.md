@@ -11,7 +11,7 @@ bash scripts/install.sh
 # Smoke test — validates Agent SDK + Playwright MCP chain
 uv run python -m qa_agent.smoke [url]
 
-# Run executor on hardcoded requirement GB-001 (iteration 1)
+# Run executor on hardcoded requirement GB-002 (lobby buttons visible)
 uv run python -m qa_agent.agent
 ```
 
@@ -42,6 +42,17 @@ These reflect the current design direction from the evaluation of `propunere1.md
 - **Output contract:** Stable JSON schema under `reports/run-<ID>/report.json` with `summary`, `results[]`, and per-failure `evidence` (screenshots, DOM snapshot, actions log). `code_hints` is *optional* and only populated when `--source-path` is passed — keeping the agent agnostic by default.
 - **State store:** SQLite or JSON under `reports/.state/` tracks last status per `requirement_id` (powers `--only-failing`), flakiness, and seeds for reproducibility.
 - **Telemetry:** Per-run `telemetry.json` with token counts, cost, latency breakdown, cache hit rate.
+- **LLM provider:** Configurable per-role via env vars (`QA_EXECUTOR_PROVIDER`, `QA_REPORTER_PROVIDER`, etc.) through LiteLLM. Supports `anthropic` (default) and `ollama`. Set `QA_PROVIDER=ollama` to use local models for all roles.
+
+## Ollama / small-model compatibility (`llm/router.py`, `agent.py`)
+
+`qwen2.5:7b` (and similar small models) have two known quirks when used via LiteLLM tool-calling:
+
+1. **Too many tools causes hallucination.** With 21 Playwright MCP tools exposed, the model ignores them and invents a fake answer. Fix: `_mcp_to_openai_tools(slim=True)` filters to 8 essential tools (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_press_key`, `browser_wait_for`, `browser_select_option`). Activated automatically when `config.provider == "ollama"`.
+
+2. **Ghost tool calls / serialized JSON output.** After receiving a tool result, the model sometimes outputs a tool call as plain-text JSON in `message.content` instead of as a structured `tool_calls` entry. Two fallbacks handle this:
+   - **Fallback-A:** if `content` is valid JSON with `status` + `actual` keys → treat it as a `report_result` call.
+   - **Fallback-B:** if `content` is valid JSON with `type: "function"` + `function.name` → execute the named tool, rewrite the last assistant message as a proper tool_call, and continue the loop.
 
 ## What *not* to build
 

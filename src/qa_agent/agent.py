@@ -26,12 +26,19 @@ MAX_TURNS = 25
 
 # Hardcoded fallback for direct `python -m qa_agent.agent` invocation
 _HARDCODED_REQ = {
-    "id": "GB-001",
-    "title": "PLAY button starts a battle",
+    "id": "GB-002",
+    "title": "Lobby displays all required navigation buttons",
     "priority": "high",
-    "given": "The lobby is loaded with Shelly visible and the PLAY button present",
-    "when": "The player clicks the PLAY button",
-    "then": "The battle screen appears with a countdown timer visible",
+    "given": "The app is loaded at the target URL",
+    "when": "The player views the lobby",
+    "then": (
+        "The Shop button is visible, "
+        "the Brawlers button is visible, "
+        "the GAMEMODES button is visible, "
+        "the PLAY button is visible, "
+        "the Quest button is visible, "
+        "and the Brawl Pass progress bar is visible"
+    ),
 }
 _TARGET_URL = "https://german-brawl.vercel.app/"
 
@@ -70,7 +77,15 @@ _REPORT_TOOL: dict = {
 }
 
 
-def _mcp_to_openai_tools(tools_result) -> list[dict]:
+# Reduced set for smaller models that struggle with 20+ tools.
+_ESSENTIAL_TOOLS = {
+    "browser_navigate", "browser_snapshot", "browser_click",
+    "browser_type", "browser_fill_form", "browser_press_key",
+    "browser_wait_for", "browser_select_option",
+}
+
+
+def _mcp_to_openai_tools(tools_result, slim: bool = False) -> list[dict]:
     return [
         {
             "type": "function",
@@ -81,6 +96,7 @@ def _mcp_to_openai_tools(tools_result) -> list[dict]:
             },
         }
         for t in tools_result.tools
+        if not slim or t.name in _ESSENTIAL_TOOLS
     ]
 
 
@@ -139,7 +155,8 @@ async def run_requirement(
             await session.initialize()
 
             mcp_tools = await session.list_tools()
-            all_tools = _mcp_to_openai_tools(mcp_tools) + [_REPORT_TOOL]
+            slim = config.provider == "ollama"
+            all_tools = _mcp_to_openai_tools(mcp_tools, slim=slim) + [_REPORT_TOOL]
 
             messages: list[dict] = [
                 {"role": "system", "content": _system_prompt()},
@@ -177,12 +194,62 @@ async def run_requirement(
                 finish = choice.finish_reason  # "stop" | "tool_calls" | "end_turn"
 
                 if finish in ("stop", "end_turn") or not msg.tool_calls:
+                    content_str = msg.content or ""
+                    try:
+                        parsed = json.loads(content_str)
+                        # Fallback A: model emitted report_result payload as text JSON
+                        if isinstance(parsed, dict) and "status" in parsed and "actual" in parsed:
+                            console.print("[dim yellow]Fallback-A: report_result from content text[/dim yellow]")
+                            verdict = parsed
+                            break
+                        # Fallback B: model emitted a ghost tool call as text JSON
+                        # e.g. {"id": "...", "type": "function", "function": {"name": "...", "arguments": {...}}}
+                        if (
+                            isinstance(parsed, dict)
+                            and parsed.get("type") == "function"
+                            and isinstance(parsed.get("function"), dict)
+                            and "name" in parsed["function"]
+                        ):
+                            fn = parsed["function"]
+                            ghost_name = fn["name"]
+                            ghost_args = fn.get("arguments") or {}
+                            if isinstance(ghost_args, str):
+                                ghost_args = json.loads(ghost_args) if ghost_args else {}
+                            if ghost_name == "report_result":
+                                console.print("[dim yellow]Fallback-B: report_result ghost call[/dim yellow]")
+                                verdict = ghost_args
+                                break
+                            ghost_id = parsed.get("id", f"ghost_{turn}")
+                            args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                            console.print(f"  [dim yellow]Ghost → {ghost_name}({args_preview})[/dim yellow]")
+                            actions_log.append({"tool": ghost_name, "input": ghost_args})
+                            mcp_result = await session.call_tool(ghost_name, ghost_args)
+                            ghost_result_text = "\n".join(
+                                c.text for c in mcp_result.content if hasattr(c, "text")
+                            )
+                            # Inject as a proper assistant tool_call + tool result pair
+                            messages[-1] = {
+                                "role": "assistant",
+                                "tool_calls": [{
+                                    "id": ghost_id,
+                                    "type": "function",
+                                    "function": {"name": ghost_name, "arguments": json.dumps(ghost_args)},
+                                }],
+                            }
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": ghost_id,
+                                "content": ghost_result_text,
+                            })
+                            continue  # retry this turn with proper tool result
+                    except (json.JSONDecodeError, TypeError):
+                        pass
                     console.print(
                         "[yellow]Warning: agent stopped without calling report_result[/yellow]"
                     )
                     verdict = {
                         "status": "fail",
-                        "actual": msg.content or "No output",
+                        "actual": content_str or "No output",
                         "reasoning": "report_result was never called",
                     }
                     break

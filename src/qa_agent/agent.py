@@ -1,5 +1,7 @@
 """
-Iteration 1 — single hardcoded requirement executed end-to-end.
+Executor — runs a single requirement via tool-use loop.
+Uses LiteLLM (OpenAI-compatible format) so any provider works:
+  Anthropic API (default) or Ollama local (--executor-provider ollama).
 Usage: uv run python -m qa_agent.agent
 """
 import asyncio
@@ -7,23 +9,23 @@ import json
 import time
 from pathlib import Path
 
-import anthropic
+import anthropic  # still used for APIError type
 from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from rich.console import Console
 from rich.panel import Panel
-from rich.rule import Rule
 from rich.text import Text
+
+from qa_agent.llm import LLMConfig, complete
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
-MODEL = "claude-sonnet-4-6"
 MAX_TURNS = 25
 
-# --- Hardcoded for iteration 1 ---
-REQUIREMENT = {
+# Hardcoded fallback for direct `python -m qa_agent.agent` invocation
+_HARDCODED_REQ = {
     "id": "GB-001",
     "title": "PLAY button starts a battle",
     "priority": "high",
@@ -31,36 +33,60 @@ REQUIREMENT = {
     "when": "The player clicks the PLAY button",
     "then": "The battle screen appears with a countdown timer visible",
 }
-TARGET_URL = "https://german-brawl.vercel.app/"
-# ----------------------------------
+_TARGET_URL = "https://german-brawl.vercel.app/"
 
-REPORT_TOOL = {
-    "name": "report_result",
-    "description": (
-        "Call this when you have determined the test outcome. "
-        "Required to finalize the test — do not stop without calling this."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "status": {
-                "type": "string",
-                "enum": ["pass", "fail"],
-                "description": "'pass' if the Then condition was satisfied, 'fail' otherwise",
+# ---------------------------------------------------------------------------
+# Tool definitions (OpenAI format)
+# ---------------------------------------------------------------------------
+
+_REPORT_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "report_result",
+        "description": (
+            "Call this when you have determined the test outcome. "
+            "Required to finalize the test — do not stop without calling this."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["pass", "fail"],
+                    "description": "'pass' if the Then condition was satisfied, 'fail' otherwise",
+                },
+                "actual": {
+                    "type": "string",
+                    "description": "What you actually observed in the browser",
+                },
+                "reasoning": {
+                    "type": "string",
+                    "description": "Concise explanation of why you gave this verdict",
+                },
             },
-            "actual": {
-                "type": "string",
-                "description": "What you actually observed in the browser",
-            },
-            "reasoning": {
-                "type": "string",
-                "description": "Concise explanation of why you gave this verdict",
-            },
+            "required": ["status", "actual", "reasoning"],
         },
-        "required": ["status", "actual", "reasoning"],
     },
 }
 
+
+def _mcp_to_openai_tools(tools_result) -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description or "",
+                "parameters": t.inputSchema,
+            },
+        }
+        for t in tools_result.tools
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Prompt helpers
+# ---------------------------------------------------------------------------
 
 def _system_prompt() -> str:
     return (PROMPTS_DIR / "executor_system.md").read_text()
@@ -81,10 +107,23 @@ def _user_message(req: dict, url: str) -> str:
     )
 
 
-async def run_requirement(req: dict, url: str) -> dict:
-    console = Console()
+# ---------------------------------------------------------------------------
+# Main executor
+# ---------------------------------------------------------------------------
 
-    console.rule(f"[bold]{req['id']}[/bold] — {req['title']}")
+async def run_requirement(
+    req: dict,
+    url: str,
+    config: LLMConfig | None = None,
+) -> dict:
+    if config is None:
+        config = LLMConfig.from_env(role="executor")
+
+    console = Console()
+    console.rule(
+        f"[bold]{req['id']}[/bold] — {req['title']} "
+        f"[dim]({config.provider}/{config.resolved_model()})[/dim]"
+    )
     console.print(f"[dim]Given:[/dim] {req['given']}")
     console.print(f"[dim]When: [/dim] {req['when']}")
     console.print(f"[dim]Then: [/dim] {req['then']}")
@@ -99,80 +138,86 @@ async def run_requirement(req: dict, url: str) -> dict:
         async with ClientSession(read, write) as session:
             await session.initialize()
 
-            tools_result = await session.list_tools()
-            playwright_tools = [
-                {
-                    "name": t.name,
-                    "description": t.description or "",
-                    "input_schema": t.inputSchema,
-                }
-                for t in tools_result.tools
-            ]
-            all_tools = playwright_tools + [REPORT_TOOL]
+            mcp_tools = await session.list_tools()
+            all_tools = _mcp_to_openai_tools(mcp_tools) + [_REPORT_TOOL]
 
-            client = anthropic.Anthropic()
-            messages = [{"role": "user", "content": _user_message(req, url)}]
+            messages: list[dict] = [
+                {"role": "system", "content": _system_prompt()},
+                {"role": "user", "content": _user_message(req, url)},
+            ]
+
             actions_log: list[dict] = []
             verdict: dict | None = None
             start = time.monotonic()
 
             for turn in range(MAX_TURNS):
                 try:
-                    response = client.messages.create(
-                        model=MODEL,
-                        max_tokens=2048,
-                        system=_system_prompt(),
-                        tools=all_tools,
-                        messages=messages,
-                    )
-                except anthropic.APIError as e:
+                    response = complete(config, messages, tools=all_tools)
+                except Exception as e:
                     verdict = {
                         "status": "error",
-                        "actual": f"API error: {e}",
+                        "actual": f"LLM error: {e}",
                         "reasoning": str(e),
                     }
                     break
-                messages.append({"role": "assistant", "content": response.content})
 
-                if response.stop_reason == "end_turn":
-                    console.print("[yellow]Warning: agent stopped without calling report_result[/yellow]")
+                choice = response.choices[0]
+                msg = choice.message
+
+                # Append assistant turn (strip None fields for cleanliness)
+                assistant_entry: dict = {"role": "assistant"}
+                if msg.content:
+                    assistant_entry["content"] = msg.content
+                if msg.tool_calls:
+                    assistant_entry["tool_calls"] = [
+                        tc.model_dump() for tc in msg.tool_calls
+                    ]
+                messages.append(assistant_entry)
+
+                finish = choice.finish_reason  # "stop" | "tool_calls" | "end_turn"
+
+                if finish in ("stop", "end_turn") or not msg.tool_calls:
+                    console.print(
+                        "[yellow]Warning: agent stopped without calling report_result[/yellow]"
+                    )
                     verdict = {
                         "status": "fail",
-                        "actual": "Agent stopped without a verdict",
+                        "actual": msg.content or "No output",
                         "reasoning": "report_result was never called",
                     }
                     break
 
-                if response.stop_reason == "tool_use":
-                    tool_results = []
+                tool_results: list[dict] = []
+                for tc in msg.tool_calls:
+                    name = tc.function.name
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        args = {}
 
-                    for block in response.content:
-                        if block.type != "tool_use":
-                            continue
-
-                        if block.name == "report_result":
-                            verdict = block.input
-                            break
-
-                        args_preview = json.dumps(block.input, ensure_ascii=False)[:100]
-                        console.print(f"  [dim cyan]→ {block.name}({args_preview})[/dim cyan]")
-                        actions_log.append({"tool": block.name, "input": block.input})
-
-                        mcp_result = await session.call_tool(block.name, block.input)
-                        content_text = "\n".join(
-                            c.text for c in mcp_result.content if hasattr(c, "text")
-                        )
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": content_text,
-                        })
-
-                    if verdict:
+                    if name == "report_result":
+                        verdict = args
                         break
 
-                    if tool_results:
-                        messages.append({"role": "user", "content": tool_results})
+                    args_preview = json.dumps(args, ensure_ascii=False)[:100]
+                    console.print(f"  [dim cyan]→ {name}({args_preview})[/dim cyan]")
+                    actions_log.append({"tool": name, "input": args})
+
+                    mcp_result = await session.call_tool(name, args)
+                    content_text = "\n".join(
+                        c.text for c in mcp_result.content if hasattr(c, "text")
+                    )
+                    tool_results.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": content_text,
+                    })
+
+                if verdict:
+                    break
+
+                if tool_results:
+                    messages.extend(tool_results)
 
             if not verdict:
                 verdict = {
@@ -183,37 +228,43 @@ async def run_requirement(req: dict, url: str) -> dict:
 
             duration = round(time.monotonic() - start, 1)
 
-            # --- Display result ---
+            # Display result
             console.print()
-            status = verdict["status"].upper()
+            status = verdict.get("status", "fail").upper()
             is_pass = status == "PASS"
             color = "green" if is_pass else "red"
             icon = "✓" if is_pass else "✗"
 
-            summary = Text()
-            summary.append(f" {icon} {status} ", style=f"bold {color}")
-            summary.append(f" │  {len(actions_log)} actions  │  {duration}s ")
+            label = Text()
+            label.append(f" {icon} {status} ", style=f"bold {color}")
+            label.append(f" │  {len(actions_log)} actions  │  {duration}s ")
 
             console.print(Panel(
-                f"[bold]Actual:[/bold]    {verdict['actual']}\n"
-                f"[bold]Reasoning:[/bold] {verdict['reasoning']}",
-                title=summary,
+                f"[bold]Actual:[/bold]    {verdict.get('actual', '')}\n"
+                f"[bold]Reasoning:[/bold] {verdict.get('reasoning', '')}",
+                title=label,
                 border_style=color,
             ))
 
             return {
                 **verdict,
                 "id": req["id"],
+                "title": req.get("title", ""),
+                "then": req.get("then", ""),
+                "priority": req.get("priority", "medium"),
                 "actions_log": actions_log,
                 "duration_s": duration,
                 "turns": turn + 1,
+                "provider": config.provider,
+                "model": config.resolved_model(),
             }
 
 
 async def main() -> None:
-    result = await run_requirement(REQUIREMENT, TARGET_URL)
-    # Raw JSON for downstream consumers
-    print("\n" + json.dumps(result, indent=2, ensure_ascii=False))
+    config = LLMConfig.from_env(role="executor")
+    result = await run_requirement(_HARDCODED_REQ, _TARGET_URL, config)
+    import json as _json
+    print("\n" + _json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

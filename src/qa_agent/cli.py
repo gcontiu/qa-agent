@@ -9,6 +9,7 @@ from rich.table import Table
 from rich import box
 
 from qa_agent.agent import run_requirement
+from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
 from qa_agent.specs import load_spec
 from qa_agent.state import StateStore
@@ -24,10 +25,10 @@ _STATE_DB = Path("reports/.state/runs.db")
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _execute_requirements(requirements, url: str) -> list[dict]:
+async def _execute_requirements(requirements, url: str, llm: LLMConfig) -> list[dict]:
     results = []
     for req in requirements:
-        result = await run_requirement(req.to_executor_dict(), url)
+        result = await run_requirement(req.to_executor_dict(), url, llm)
         results.append(result)
         console.print()
     return results
@@ -89,6 +90,8 @@ def run(
     output: Path = typer.Option(_DEFAULT_REPORTS_DIR, "--output", help="Reports base directory"),
     only_failing: bool = typer.Option(False, "--only-failing", help="Re-run only requirements that failed in the last run"),
     previous: str = typer.Option(None, "--previous", help="Run ID to use as baseline for --only-failing"),
+    executor_provider: str = typer.Option(None, "--executor-provider", help="LLM provider: anthropic (default) or ollama"),
+    executor_model: str = typer.Option(None, "--executor-model", help="Model name override for executor"),
 ):
     """Run all requirements from a spec directory."""
     start = time.monotonic()
@@ -125,11 +128,17 @@ def run(
                 f"({len(skipped_results)} skipped — passed previously)[/dim]"
             )
 
+    llm = LLMConfig.from_env(role="executor")
+    if executor_provider:
+        llm.provider = executor_provider
+    if executor_model:
+        llm.model = executor_model
+
     console.print(f"\n[bold]{bundle.config.name}[/bold]  [dim]{url}[/dim]")
-    console.print(f"[dim]{len(requirements)} requirements to run[/dim]\n")
+    console.print(f"[dim]{len(requirements)} requirements  │  executor: {llm.provider}/{llm.resolved_model()}[/dim]\n")
 
     try:
-        results = asyncio.run(_execute_requirements(requirements, url))
+        results = asyncio.run(_execute_requirements(requirements, url, llm))
     except Exception as e:
         console.print(f"[red]Unexpected error:[/red] {e}")
         store.close()

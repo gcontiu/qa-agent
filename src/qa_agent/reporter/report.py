@@ -1,15 +1,15 @@
 """
 Generates report.json + report.md for a completed run.
-Reporter uses claude-haiku (cheap) — pure summarisation task.
+Reporter uses LiteLLM — works with any provider (Anthropic, Ollama, etc.).
+Default: claude-haiku for Anthropic, qwen2.5:7b for Ollama.
 """
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-import anthropic
+from qa_agent.llm import LLMConfig, complete
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-_MODEL = "claude-haiku-4-5-20251001"
 
 
 def _reporter_system() -> str:
@@ -19,9 +19,12 @@ def _reporter_system() -> str:
 def generate_report(
     results: list[dict],
     run_meta: dict,
+    config: LLMConfig | None = None,
 ) -> str:
-    """Call Haiku to produce a markdown report. Returns markdown string."""
-    client = anthropic.Anthropic()
+    """Call the configured LLM to produce a markdown report. Returns markdown string."""
+    if config is None:
+        config = LLMConfig.from_env(role="reporter")
+
     user_content = (
         f"Product: {run_meta.get('name', 'Unknown')}\n"
         f"Run ID: {run_meta['run_id']}\n"
@@ -29,13 +32,15 @@ def generate_report(
         f"Date: {run_meta['started_at']}\n\n"
         f"Results:\n{json.dumps(results, indent=2, ensure_ascii=False)}"
     )
-    response = client.messages.create(
-        model=_MODEL,
+    response = complete(
+        config,
+        messages=[
+            {"role": "system", "content": _reporter_system()},
+            {"role": "user", "content": user_content},
+        ],
         max_tokens=2048,
-        system=_reporter_system(),
-        messages=[{"role": "user", "content": user_content}],
     )
-    return response.content[0].text
+    return response.choices[0].message.content
 
 
 def write_run(
@@ -47,8 +52,8 @@ def write_run(
 ) -> Path:
     """
     Write the full run artefacts to output_dir:
-      report.json  — machine-readable, stable schema v1.0
-      report.md    — human-friendly markdown
+      report.json    — machine-readable, stable schema v1.0
+      report.md      — human-friendly markdown (via LLM)
       telemetry.json — token/action counts
     Returns the run directory Path.
     """
@@ -88,9 +93,10 @@ def write_run(
         json.dumps(report_json, indent=2, ensure_ascii=False)
     )
 
-    # --- report.md (via Haiku) ---
+    # --- report.md (via LLM) ---
+    reporter_config = LLMConfig.from_env(role="reporter")
     try:
-        md = generate_report(results, run_meta)
+        md = generate_report(results, run_meta, reporter_config)
     except Exception as e:
         md = f"# QA Report\n\nReport generation failed: {e}\n"
     (run_dir / "report.md").write_text(md)
@@ -100,6 +106,8 @@ def write_run(
     total_duration = sum(r.get("duration_s", 0) for r in results)
     telemetry = {
         "run_id": run_id,
+        "reporter_provider": reporter_config.provider,
+        "reporter_model": reporter_config.resolved_model(),
         "total_actions": total_actions,
         "total_duration_s": round(total_duration, 1),
         "requirements_count": len(results),

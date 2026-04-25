@@ -59,9 +59,11 @@ Some models (observed: `llama3.1:8b` in early tests) output a JSON test plan as 
 
 | Model | slim | `tool_choice=required` | Outcome |
 |-------|------|----------------------|---------|
-| qwen2.5:7b | ✓ (default) | ✗ regresses (snapshot loop) | Use default — no `QA_TOOL_CHOICE` |
-| llama3.1:8b | off (`QA_FORCE_SLIM=false`) | not needed — bootstrap is enough | Use default — no `QA_TOOL_CHOICE` |
-| llama3.1:8b | off | `QA_TOOL_CHOICE=required` | Also works, but unnecessary |
+| qwen2.5:7b | ✓ (default) | ✗ regresses (snapshot loop) | Use default |
+| qwen2.5:14b | ✓ (default) | not tested | 5/6 PASS — slim is optimal; full (21 tools) causes invented tool names |
+| llama3.1:8b | off (`QA_FORCE_SLIM=false`) | not needed | Use default |
+
+`QA_FORCE_SLIM=false` is not recommended for any tested model. Slim mode (8 tools) is the correct default for all Ollama models.
 
 ```bash
 # Only use if a new model outputs test plans with the default config:

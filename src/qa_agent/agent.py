@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from qa_agent.llm import LLMConfig, complete
+from qa_agent.llm import LLMConfig, complete, ensure_provider_running
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -140,6 +140,8 @@ async def run_requirement(
     if config is None:
         config = LLMConfig.from_env(role="executor")
 
+    ensure_provider_running(config)
+
     # Sentinel ... means "use provider default"; None means "no cap"
     if test_timeout is ...:  # type: ignore[comparison-overlap]
         env_val = os.getenv("QA_TEST_TIMEOUT")
@@ -160,7 +162,7 @@ async def run_requirement(
 
     server_params = StdioServerParameters(
         command="npx",
-        args=["@playwright/mcp@latest", "--headless", "--isolated"],
+        args=["@playwright/mcp@latest", "--headless", "--isolated", "--browser=chromium"],
     )
 
     async with stdio_client(server_params) as (read, write):
@@ -183,6 +185,25 @@ async def run_requirement(
             ]
 
             actions_log: list[dict] = []
+
+            # Bootstrap: pre-navigate for providers that struggle to initiate tool calls.
+            # Injects browser_navigate as a completed turn so the model starts mid-stream.
+            # Disable with QA_NO_BOOTSTRAP=true if the pre-injected message confuses the model.
+            if config.provider == "ollama" and not os.getenv("QA_NO_BOOTSTRAP"):
+                console.print(f"  [dim cyan]→ browser_navigate({url!r}) [bootstrap][/dim cyan]")
+                nav_result = await session.call_tool("browser_navigate", {"url": url})
+                nav_text = "\n".join(c.text for c in nav_result.content if hasattr(c, "text"))
+                boot_id = "bootstrap_nav_0"
+                messages.append({
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": boot_id, "type": "function",
+                        "function": {"name": "browser_navigate", "arguments": json.dumps({"url": url})},
+                    }],
+                })
+                messages.append({"role": "tool", "tool_call_id": boot_id, "content": nav_text})
+                actions_log.append({"tool": "browser_navigate", "input": {"url": url}})
+
             verdict: dict | None = None
             start = time.monotonic()
 
@@ -208,6 +229,10 @@ async def run_requirement(
 
                 choice = response.choices[0]
                 msg = choice.message
+                if os.getenv("QA_DEBUG"):
+                    import sys
+                    print(f"[DEBUG turn={turn}] finish={choice.finish_reason!r} "
+                          f"content={msg.content!r} tool_calls={msg.tool_calls!r}", file=sys.stderr)
 
                 # Append assistant turn (strip None fields for cleanliness)
                 assistant_entry: dict = {"role": "assistant"}
@@ -230,8 +255,7 @@ async def run_requirement(
                             console.print("[dim yellow]Fallback-A: report_result from content text[/dim yellow]")
                             verdict = parsed
                             break
-                        # Fallback B: model emitted a ghost tool call as text JSON
-                        # e.g. {"id": "...", "type": "function", "function": {"name": "...", "arguments": {...}}}
+                        # Fallback B: {"type":"function","function":{"name":"...","arguments":{...}}}
                         if (
                             isinstance(parsed, dict)
                             and parsed.get("type") == "function"
@@ -249,27 +273,111 @@ async def run_requirement(
                                 break
                             ghost_id = parsed.get("id", f"ghost_{turn}")
                             args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
-                            console.print(f"  [dim yellow]Ghost → {ghost_name}({args_preview})[/dim yellow]")
+                            console.print(f"  [dim yellow]Ghost-B → {ghost_name}({args_preview})[/dim yellow]")
                             actions_log.append({"tool": ghost_name, "input": ghost_args})
                             mcp_result = await session.call_tool(ghost_name, ghost_args)
                             ghost_result_text = "\n".join(
                                 c.text for c in mcp_result.content if hasattr(c, "text")
                             )
-                            # Inject as a proper assistant tool_call + tool result pair
                             messages[-1] = {
                                 "role": "assistant",
                                 "tool_calls": [{
-                                    "id": ghost_id,
-                                    "type": "function",
+                                    "id": ghost_id, "type": "function",
                                     "function": {"name": ghost_name, "arguments": json.dumps(ghost_args)},
                                 }],
                             }
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": ghost_id,
-                                "content": ghost_result_text,
-                            })
-                            continue  # retry this turn with proper tool result
+                            messages.append({"role": "tool", "tool_call_id": ghost_id, "content": ghost_result_text})
+                            continue
+                        # Fallback C: {"function":"<name>","parameters":{...},...}
+                        # llama3.1 / some Ollama models emit this format under tool_choice=required
+                        if (
+                            isinstance(parsed, dict)
+                            and isinstance(parsed.get("function"), str)
+                            and parsed["function"]
+                        ):
+                            ghost_name = parsed["function"]
+                            ghost_args = parsed.get("parameters") or parsed.get("arguments") or {}
+                            if isinstance(ghost_args, str):
+                                ghost_args = json.loads(ghost_args) if ghost_args else {}
+                            if ghost_name == "report_result":
+                                console.print("[dim yellow]Fallback-C: report_result ghost call[/dim yellow]")
+                                verdict = ghost_args
+                                break
+                            ghost_id = f"ghost_c_{turn}"
+                            args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                            console.print(f"  [dim yellow]Ghost-C → {ghost_name}({args_preview})[/dim yellow]")
+                            actions_log.append({"tool": ghost_name, "input": ghost_args})
+                            mcp_result = await session.call_tool(ghost_name, ghost_args)
+                            ghost_result_text = "\n".join(
+                                c.text for c in mcp_result.content if hasattr(c, "text")
+                            )
+                            messages[-1] = {
+                                "role": "assistant",
+                                "tool_calls": [{
+                                    "id": ghost_id, "type": "function",
+                                    "function": {"name": ghost_name, "arguments": json.dumps(ghost_args)},
+                                }],
+                            }
+                            messages.append({"role": "tool", "tool_call_id": ghost_id, "content": ghost_result_text})
+                            continue
+                        # Fallback D: {"type":"function","name":"<name>","parameters":{...}}
+                        # flat variant — name at top level, no nested "function" dict
+                        if (
+                            isinstance(parsed, dict)
+                            and parsed.get("type") == "function"
+                            and isinstance(parsed.get("name"), str)
+                            and parsed["name"]
+                        ):
+                            ghost_name = parsed["name"]
+                            ghost_args = parsed.get("parameters") or parsed.get("arguments") or {}
+                            if isinstance(ghost_args, str):
+                                ghost_args = json.loads(ghost_args) if ghost_args else {}
+                            if ghost_name == "report_result":
+                                console.print("[dim yellow]Fallback-D: report_result ghost call[/dim yellow]")
+                                verdict = ghost_args
+                                break
+                            ghost_id = f"ghost_d_{turn}"
+                            args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                            console.print(f"  [dim yellow]Ghost-D → {ghost_name}({args_preview})[/dim yellow]")
+                            actions_log.append({"tool": ghost_name, "input": ghost_args})
+                            mcp_result = await session.call_tool(ghost_name, ghost_args)
+                            ghost_result_text = "\n".join(
+                                c.text for c in mcp_result.content if hasattr(c, "text")
+                            )
+                            messages[-1] = {
+                                "role": "assistant",
+                                "tool_calls": [{
+                                    "id": ghost_id, "type": "function",
+                                    "function": {"name": ghost_name, "arguments": json.dumps(ghost_args)},
+                                }],
+                            }
+                            messages.append({"role": "tool", "tool_call_id": ghost_id, "content": ghost_result_text})
+                            continue
+                        # Fallback E: {"<tool_name>": {args}} — tool name as the sole key
+                        if isinstance(parsed, dict) and len(parsed) == 1:
+                            ghost_name, ghost_args = next(iter(parsed.items()))
+                            if isinstance(ghost_name, str) and isinstance(ghost_args, dict):
+                                if ghost_name == "report_result":
+                                    console.print("[dim yellow]Fallback-E: report_result ghost call[/dim yellow]")
+                                    verdict = ghost_args
+                                    break
+                                ghost_id = f"ghost_e_{turn}"
+                                args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                                console.print(f"  [dim yellow]Ghost-E → {ghost_name}({args_preview})[/dim yellow]")
+                                actions_log.append({"tool": ghost_name, "input": ghost_args})
+                                mcp_result = await session.call_tool(ghost_name, ghost_args)
+                                ghost_result_text = "\n".join(
+                                    c.text for c in mcp_result.content if hasattr(c, "text")
+                                )
+                                messages[-1] = {
+                                    "role": "assistant",
+                                    "tool_calls": [{
+                                        "id": ghost_id, "type": "function",
+                                        "function": {"name": ghost_name, "arguments": json.dumps(ghost_args)},
+                                    }],
+                                }
+                                messages.append({"role": "tool", "tool_call_id": ghost_id, "content": ghost_result_text})
+                                continue
                     except (json.JSONDecodeError, TypeError):
                         pass
                     console.print(
@@ -325,7 +433,7 @@ async def run_requirement(
 
             # Display result
             console.print()
-            status = verdict.get("status", "fail").upper()
+            status = (verdict.get("status") or "fail").upper()
             is_pass = status == "PASS"
             color = "green" if is_pass else "red"
             icon = "✓" if is_pass else "✗"

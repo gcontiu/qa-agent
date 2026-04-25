@@ -134,7 +134,32 @@ _DEFAULTS = {
 }
 
 
-_LLM_TIMEOUT_DEFAULTS = {"ollama": 120, "anthropic": 30}
+# Per-model timeout defaults. Ollama entries are keyed by model name;
+# "__default__" covers any model not explicitly listed.
+_LLM_TIMEOUT_DEFAULTS: dict = {
+    "anthropic": 30,
+    "ollama": {
+        "qwen2.5:14b": 60,   # ~23s/turn on M4 Pro GPU — 60s gives ample headroom
+        "qwen2.5:32b": 90,
+        "__default__": 120,  # qwen2.5:7b, llama3.1:8b, CPU inference
+    },
+}
+
+_TEST_TIMEOUT_DEFAULTS: dict = {
+    "anthropic": None,
+    "ollama": {
+        "qwen2.5:14b": 180,  # 23s/turn × ~8 turns max on M4 Pro
+        "__default__": 360,  # qwen2.5:7b on CPU: ~60s/turn × 6 turns
+    },
+}
+
+
+def _resolve_timeout(defaults: dict, provider: str, model: str) -> int | None:
+    """Resolve a timeout from a provider/model-keyed defaults dict."""
+    val = defaults.get(provider)
+    if isinstance(val, dict):
+        return val.get(model, val.get("__default__", 30))
+    return val
 
 
 @dataclass
@@ -153,8 +178,9 @@ class LLMConfig:
         provider = os.getenv(f"{prefix}PROVIDER", os.getenv("QA_PROVIDER", "anthropic"))
         model = os.getenv(f"{prefix}MODEL", os.getenv("QA_MODEL"))
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        default_timeout = _LLM_TIMEOUT_DEFAULTS.get(provider, 30)
-        llm_timeout = int(os.getenv("QA_LLM_TIMEOUT", default_timeout))
+        resolved_model = model or _DEFAULTS.get(role, {}).get(provider, "")
+        default_llm_timeout = _resolve_timeout(_LLM_TIMEOUT_DEFAULTS, provider, resolved_model) or 30
+        llm_timeout = int(os.getenv("QA_LLM_TIMEOUT", default_llm_timeout))
         # force_slim: None=auto (based on provider), True=always slim, False=always full
         force_slim_str = os.getenv("QA_FORCE_SLIM", "").lower()
         force_slim = {"true": True, "false": False}.get(force_slim_str, None)

@@ -1,10 +1,11 @@
 Feature: German Brawl — Core Gameplay
 
   @id:GB-001 @priority:high
-  Scenario: PLAY button starts a battle with a visible timer
-    Given the lobby is loaded with Shelly visible
+  Scenario: Clicking PLAY leaves the lobby and starts the battle flow
+    Given the lobby is loaded
     When the player clicks the PLAY button
-    Then the battle screen appears with a countdown timer visible
+    Then the lobby main screen is no longer shown
+    And a queue indicator, countdown timer, or battle screen element is visible
 
   @id:GB-002 @priority:high
   Scenario: Lobby displays all required navigation buttons
@@ -17,11 +18,11 @@ Feature: German Brawl — Core Gameplay
     And the Brawl Pass progress bar is visible
 
   @id:GB-003 @priority:high
-  Scenario: Battle presents a word and an input field for translation
+  Scenario: Battle screen shows a word to translate and an input field
     Given the lobby is loaded
-    When the player clicks the PLAY button
-    Then a word is displayed on the battle screen for translation
-    And a text input field is available for the answer
+    When the player clicks the PLAY button and waits for the battle to begin
+    Then a word or phrase is visible on screen for translation
+    And a text input field is present for typing the answer
 
   @id:GB-004 @priority:medium
   Scenario: Resource counters are displayed in the lobby

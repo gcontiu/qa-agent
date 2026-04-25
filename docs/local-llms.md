@@ -75,33 +75,43 @@ After receiving a tool result, models sometimes output a tool call as plain-text
 | Fallback | Detected format | Observed in |
 |----------|----------------|-------------|
 | **A** | `{"status":"…","actual":"…"}` | Any model — plain report_result |
-| **B** | `{"type":"function","function":{"name":"…","arguments":{…}}}` | qwen2.5:7b, llama3.1:8b |
+| **B** | `{"type":"function","function":{"name":"…","arguments":{…}}}` | qwen2.5:7b, llama3.1:8b, qwen2.5:14b |
 | **C** | `{"function":"<name>","parameters":{…}}` | llama3.1:8b under `tool_choice=required` |
 | **D** | `{"type":"function","name":"<name>","parameters":{…}}` | llama3.1:8b (flat variant) |
 | **E** | `{"<tool_name>":{…}}` — sole key is the tool name | llama3.1:8b (wrapper variant) |
+| **F** | `{"tool_calls":[{"type":"function","function":{"name":"…"}}]}` — array wrapper | qwen2.5:14b |
+| **G** | `{"name":"<tool>","args":{…}}` — flat, no "function" key | qwen2.5:14b (turn exhaustion) |
 
 Each ghost call is executed via MCP and rewritten as a proper `tool_call` + `tool` result pair so the conversation history stays well-formed for subsequent turns.
 
 **Adding support for a new ghost format:** add a new `Fallback-E` block inside the `if finish in ("stop", "end_turn") or not msg.tool_calls:` branch in `agent.py`, following the same pattern as B/C/D.
 
-### 4. Bootstrap navigation (Ollama only)
+### 4. Bootstrap — navigate + snapshot (Ollama only)
 
-Some models (including `llama3.1:8b`) skip `browser_navigate` as their first step. For `provider == "ollama"`, `run_requirement()` pre-executes `browser_navigate(url)` via MCP before the LLM loop starts and injects it into the message history as a completed tool call. The model then starts mid-stream and only needs to snapshot + report.
+For `provider == "ollama"`, `run_requirement()` pre-executes two MCP calls before the LLM loop starts and injects them into message history as completed tool calls:
 
-**Side effects:**
-- Navigation counts in `actions_log` and against `test_timeout` (starts the clock).
-- The model may still call `browser_navigate` again (idempotent — Playwright silently re-navigates).
-- Does not apply to Anthropic — those models initiate navigation correctly on their own.
+1. `browser_navigate(url)` — page is loaded
+2. `browser_snapshot()` — **Variant B**: model receives the full accessibility tree with element refs at turn 0
 
-**If bootstrap causes issues** (e.g., model gets confused by the pre-injected message), disable it:
+The model starts mid-stream with both the page loaded and its structure visible. It can immediately act on elements (click, type) without spending a turn on orientation.
 
-```bash
-QA_NO_BOOTSTRAP=true uv run python -m qa_agent.agent
+**Without bootstrap snapshot** — turn 0 is wasted:
+```
+Turn 0: browser_snapshot({})   ← model takes snapshot to see the page (~23s)
+Turn 1: browser_click(ref="e77")  ← now it can act
 ```
 
-The guard in `agent.py`:
+**With bootstrap snapshot** — model acts immediately:
+```
+Turn 0: browser_click(ref="e77")  ← refs already in context from bootstrap
+```
 
-```python
-if config.provider == "ollama" and not os.getenv("QA_NO_BOOTSTRAP"):
-    # pre-navigate …
+**Side effects:**
+- Both bootstrap actions count in `actions_log`.
+- The model may still call `browser_navigate` or `browser_snapshot` again — both are idempotent.
+- Does not apply to Anthropic — those models initiate correctly on their own.
+
+**Disable if the pre-injected context confuses a model:**
+```bash
+QA_NO_BOOTSTRAP=true uv run python -m qa_agent.agent
 ```

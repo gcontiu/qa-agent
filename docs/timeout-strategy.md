@@ -19,19 +19,24 @@ reasoning: (same as actual)
 ```
 
 **Configuration:**
-- **Default:** `ollama=120s`, `anthropic=30s` (hardcoded in `_LLM_TIMEOUT_DEFAULTS`)
-- **Override:** Set `QA_LLM_TIMEOUT=<seconds>` env var
+- **Default:** per-model (see table below), resolved by `_resolve_timeout()` in `router.py`
+- **Override:** Set `QA_LLM_TIMEOUT=<seconds>` env var — overrides all model-specific defaults
   ```bash
   QA_LLM_TIMEOUT=180 uv run python -m qa_agent.agent  # increase to 180s
   QA_LLM_TIMEOUT=10 uv run python -m qa_agent.agent   # strict 10s cutoff for testing
   ```
-- **Per-role:** Use `QA_EXECUTOR_LLM_TIMEOUT`, `QA_REPORTER_LLM_TIMEOUT`, etc. (read by `from_env(role=...)`)
+- **Per-role:** Use `QA_EXECUTOR_LLM_TIMEOUT`, `QA_REPORTER_LLM_TIMEOUT`, etc.
 
-**Tuning advice:**
-- **Ollama on GPU:** 30–60s (fast inference)
-- **Ollama on CPU:** 90–180s (slow inference; each turn takes ~60s per 7B model)
-- **Anthropic API:** 20–30s (very fast; rarely needed)
-- For CI/CD: set aggressively low (e.g. 30s) to fail fast; for local development, be generous
+**Per-model defaults (`_LLM_TIMEOUT_DEFAULTS` in `router.py`):**
+
+| Provider | Model | LLM timeout | Observed turn time |
+|----------|-------|-------------|-------------------|
+| anthropic | any | 30s | ~2s |
+| ollama | qwen2.5:14b | 60s | ~23s (M4 Pro GPU) |
+| ollama | qwen2.5:32b | 90s | — |
+| ollama | any other | 120s | ~15s (7B GPU), ~60s (7B CPU) |
+
+**Adding a new model:** add an entry to the `"ollama"` dict in `_LLM_TIMEOUT_DEFAULTS`. The `"__default__"` key covers all unlisted models.
 
 ### Per-Test Soft Timeout (`run_requirement(test_timeout)`)
 
@@ -53,9 +58,7 @@ Reasoning: "test_timeout=360s exceeded after 4 turns"
 ```
 
 **Configuration:**
-- **Default:** `ollama=360s`, `anthropic=None` (hardcoded in `_TEST_TIMEOUT_DEFAULTS`)
-  - Ollama: 360s = ~3–4 turns at 90–120s per turn (reasonable buffer)
-  - Anthropic: `None` = no cap (fast enough that timeout is rarely needed)
+- **Default:** per-model (see table below), resolved by `_resolve_timeout()` in `router.py`
 - **Override:** Set `QA_TEST_TIMEOUT=<seconds>` env var
   ```bash
   QA_TEST_TIMEOUT=120 uv run python -m qa_agent.agent  # fail if test takes >120s
@@ -63,10 +66,15 @@ Reasoning: "test_timeout=360s exceeded after 4 turns"
   ```
 - **In code:** Pass `test_timeout=180` to `run_requirement()` directly
 
-**Tuning advice:**
-- **For Ollama:** 180–360s (2–4 turns; model may loop or retry)
-- **For Anthropic:** `None` or 120–180s (conservative, prevents infinite loops)
-- **For CI/CD:** Set per-test timeout to 5–10 min per requirement; in combination with per-call timeout, prevents stuck jobs
+**Per-model defaults (`_TEST_TIMEOUT_DEFAULTS` in `router.py`):**
+
+| Provider | Model | Test timeout | Rationale |
+|----------|-------|-------------|-----------|
+| anthropic | any | None (no cap) | ~2s/turn — virtually no risk of runaway |
+| ollama | qwen2.5:14b | 180s | 23s/turn × ~8 turns max on M4 Pro GPU |
+| ollama | any other | 360s | covers CPU inference at ~60s/turn × 6 turns |
+
+**Adding a new model:** add an entry to the `"ollama"` dict in `_TEST_TIMEOUT_DEFAULTS`.
 
 ### Timeout Interaction Example
 

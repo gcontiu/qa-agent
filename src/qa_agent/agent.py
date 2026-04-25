@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from qa_agent.llm import LLMConfig, complete, ensure_provider_running
+from qa_agent.llm import LLMConfig, complete, ensure_provider_running, _resolve_timeout, _TEST_TIMEOUT_DEFAULTS
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -128,7 +128,7 @@ def _user_message(req: dict, url: str) -> str:
 # Main executor
 # ---------------------------------------------------------------------------
 
-_TEST_TIMEOUT_DEFAULTS = {"ollama": 360, "anthropic": None}
+# _TEST_TIMEOUT_DEFAULTS imported from llm.router (per-model resolution)
 
 
 async def run_requirement(
@@ -148,7 +148,7 @@ async def run_requirement(
         if env_val is not None:
             test_timeout = int(env_val)
         else:
-            test_timeout = _TEST_TIMEOUT_DEFAULTS.get(config.provider)
+            test_timeout = _resolve_timeout(_TEST_TIMEOUT_DEFAULTS, config.provider, config.resolved_model())
 
     console = Console()
     console.rule(
@@ -203,6 +203,21 @@ async def run_requirement(
                 })
                 messages.append({"role": "tool", "tool_call_id": boot_id, "content": nav_text})
                 actions_log.append({"tool": "browser_navigate", "input": {"url": url}})
+
+                # Variant B: also snapshot so the model has page context and refs at turn 0
+                console.print(f"  [dim cyan]→ browser_snapshot({{}}) [bootstrap][/dim cyan]")
+                snap_result = await session.call_tool("browser_snapshot", {})
+                snap_text = "\n".join(c.text for c in snap_result.content if hasattr(c, "text"))
+                boot_snap_id = "bootstrap_snap_0"
+                messages.append({
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": boot_snap_id, "type": "function",
+                        "function": {"name": "browser_snapshot", "arguments": json.dumps({})},
+                    }],
+                })
+                messages.append({"role": "tool", "tool_call_id": boot_snap_id, "content": snap_text})
+                actions_log.append({"tool": "browser_snapshot", "input": {}})
 
             verdict: dict | None = None
             start = time.monotonic()
@@ -364,6 +379,76 @@ async def run_requirement(
                                 ghost_id = f"ghost_e_{turn}"
                                 args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
                                 console.print(f"  [dim yellow]Ghost-E → {ghost_name}({args_preview})[/dim yellow]")
+                                actions_log.append({"tool": ghost_name, "input": ghost_args})
+                                mcp_result = await session.call_tool(ghost_name, ghost_args)
+                                ghost_result_text = "\n".join(
+                                    c.text for c in mcp_result.content if hasattr(c, "text")
+                                )
+                                messages[-1] = {
+                                    "role": "assistant",
+                                    "tool_calls": [{
+                                        "id": ghost_id, "type": "function",
+                                        "function": {"name": ghost_name, "arguments": json.dumps(ghost_args)},
+                                    }],
+                                }
+                                messages.append({"role": "tool", "tool_call_id": ghost_id, "content": ghost_result_text})
+                                continue
+                        # Fallback F: {"tool_calls":[{"type":"function","function":{"name":"...","arguments":{...}}}]}
+                        # model wraps a single tool call in a tool_calls array
+                        if (
+                            isinstance(parsed, dict)
+                            and isinstance(parsed.get("tool_calls"), list)
+                            and parsed["tool_calls"]
+                            and isinstance(parsed["tool_calls"][0], dict)
+                        ):
+                            first = parsed["tool_calls"][0]
+                            fn = first.get("function") if isinstance(first.get("function"), dict) else {}
+                            ghost_name = fn.get("name", "")
+                            if ghost_name:
+                                ghost_args = fn.get("arguments") or {}
+                                if isinstance(ghost_args, str):
+                                    ghost_args = json.loads(ghost_args) if ghost_args else {}
+                                if ghost_name == "report_result":
+                                    console.print("[dim yellow]Fallback-F: report_result ghost call[/dim yellow]")
+                                    verdict = ghost_args
+                                    break
+                                ghost_id = f"ghost_f_{turn}"
+                                args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                                console.print(f"  [dim yellow]Ghost-F → {ghost_name}({args_preview})[/dim yellow]")
+                                actions_log.append({"tool": ghost_name, "input": ghost_args})
+                                mcp_result = await session.call_tool(ghost_name, ghost_args)
+                                ghost_result_text = "\n".join(
+                                    c.text for c in mcp_result.content if hasattr(c, "text")
+                                )
+                                messages[-1] = {
+                                    "role": "assistant",
+                                    "tool_calls": [{
+                                        "id": ghost_id, "type": "function",
+                                        "function": {"name": ghost_name, "arguments": json.dumps(ghost_args)},
+                                    }],
+                                }
+                                messages.append({"role": "tool", "tool_call_id": ghost_id, "content": ghost_result_text})
+                                continue
+                        # Fallback G: {"id":"...","name":"<tool>","args":{...}} — flat, no "function" key
+                        if (
+                            isinstance(parsed, dict)
+                            and isinstance(parsed.get("name"), str)
+                            and parsed["name"]
+                            and "function" not in parsed
+                            and "tool_calls" not in parsed
+                        ):
+                            ghost_name = parsed["name"]
+                            ghost_args = parsed.get("args") or parsed.get("arguments") or parsed.get("parameters") or {}
+                            if isinstance(ghost_args, str):
+                                ghost_args = json.loads(ghost_args) if ghost_args else {}
+                            if isinstance(ghost_args, dict):
+                                if ghost_name == "report_result":
+                                    console.print("[dim yellow]Fallback-G: report_result ghost call[/dim yellow]")
+                                    verdict = ghost_args
+                                    break
+                                ghost_id = f"ghost_g_{turn}"
+                                args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                                console.print(f"  [dim yellow]Ghost-G → {ghost_name}({args_preview})[/dim yellow]")
                                 actions_log.append({"tool": ghost_name, "input": ghost_args})
                                 mcp_result = await session.call_tool(ghost_name, ghost_args)
                                 ghost_result_text = "\n".join(

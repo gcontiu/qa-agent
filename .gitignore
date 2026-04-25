@@ -12,3 +12,5 @@ node_modules/
 dist/
 *.egg-info/
 .pytest_cache/
+*.yml filter=lfs diff=lfs merge=lfs
+page-*.yml

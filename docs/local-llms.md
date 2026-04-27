@@ -117,3 +117,44 @@ Turn 0: browser_click(ref="e77")  ← refs already in context from bootstrap
 ```bash
 QA_NO_BOOTSTRAP=true uv run python -m qa_agent.agent
 ```
+
+### 5. Bootstrap snapshot depth limit
+
+Large accessibility trees (e.g. production marketing sites) overwhelm small models — they retrieve the data but fail to reason about it and never call `report_result`. The bootstrap snapshot now accepts a `depth` parameter to truncate the tree.
+
+```bash
+QA_BOOTSTRAP_DEPTH=5 uv run python -m qa_agent.agent  # default
+QA_BOOTSTRAP_DEPTH=3 uv run python -m qa_agent.agent  # for very dense pages
+```
+
+Lower values mean less context and faster inference, but risk hiding nested elements (e.g. links inside cards inside sections). `depth=5` is the empirical sweet spot for qwen2.5:14b.
+
+---
+
+## Summary of local-LLM runs to date
+
+Empirical results across two test targets:
+- **German Brawl** (gaming site, simple DOM, ~6 scenarios)
+- **alconind.ro** (industrial B2B marketing site, dense DOM, 7 homepage scenarios)
+
+| Model | Hardware | German Brawl | alconind.ro | Primary failure mode |
+|-------|----------|--------------|-------------|----------------------|
+| `qwen2.5:7b` | M4 Pro (CPU/GPU) | ✓ stable with slim+bootstrap | not tested at scale | Limited reasoning on dense pages — fine for simple sites |
+| `qwen2.5:14b` | M4 Pro GPU | ✓ 5/6 PASS | partial: 2/7 PASS (only homepage AC-001/AC-002) | **Does not call `report_result` on large accessibility trees** — emits JSON verdict as text in `message.content` instead of structured tool call. Ghost fallbacks F/G recover some, not all |
+| `qwen2.5:32b` | M4 Pro | not tested | **0/7 PASS — every scenario LLM-timeout at 150s** | Hardware bottleneck: 19GB weights + memory bandwidth limit on Apple Silicon. Inference too slow even with extended timeouts. Not viable on this hardware |
+| `llama3.1:8b` | M4 Pro GPU | ✓ functional | not tested | Outputs full test plan as JSON text instead of tool calls. Requires `QA_TOOL_CHOICE=required` + ghost fallbacks C/D/E to function |
+
+### Key takeaways
+
+1. **Tool-calling is solved; reasoning is the bottleneck.** All ghost-output edge cases (A–G) are now caught by fallbacks. The remaining failure mode is *the model retrieves correct evidence but does not synthesize a verdict* on dense pages.
+
+2. **Ollama is viable only for simple/medium-complexity targets.** Production marketing sites with 100+ accessibility-tree nodes per page exceed what `qwen2.5:7b` and `qwen2.5:14b` reliably handle end-to-end.
+
+3. **Hardware ceiling on M4 Pro** is around 14B parameters. `qwen2.5:32b` is not memory-bandwidth-feasible — even when not OOM, inference is slow enough that 150s LLM timeout (already 5× the Anthropic default) is exhausted before the first response.
+
+4. **Recommended configurations:**
+   - **Local-only, simple targets:** `qwen2.5:14b` with `QA_BOOTSTRAP_DEPTH=3-5`, slim mode (default), no `tool_choice`.
+   - **Hybrid (best cost/reliability):** `QA_EXECUTOR_PROVIDER=anthropic` + `QA_PLANNER_PROVIDER=ollama` + `QA_REPORTER_PROVIDER=ollama`. Cuts API spend ~75% while keeping the difficult role on a capable model.
+   - **Anthropic-only:** the only path with consistent passes on production marketing sites today.
+
+5. **Future evaluation candidates** (not yet tested in this repo): `qwen2.5-coder:14b` (specialized for tool-use), `mistral-small:22b` (fits in M4 Pro RAM), `llama3.3:8b` (improved tool-calling over 3.1). vLLM with MLX backend remains an unexplored optimization for Apple Silicon throughput.

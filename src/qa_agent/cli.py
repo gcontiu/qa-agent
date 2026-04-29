@@ -9,6 +9,7 @@ from rich.table import Table
 from rich import box
 
 from qa_agent.agent import run_requirement
+from qa_agent.analyst import run_analysis
 from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
 from qa_agent.specs import load_spec
@@ -212,6 +213,43 @@ def list_runs(
             fail_str,
         )
     console.print(table)
+
+
+@app.command()
+def analyze(
+    url: str = typer.Argument(..., help="Root URL of the product to analyze"),
+    description: str = typer.Option(..., "--description", "-d", help="One-line product description"),
+    prefix: str = typer.Option("SC", "--prefix", "-p", help="Scenario ID prefix (e.g. AC → AC-001, AC-002)"),
+    output: Path = typer.Option(None, "--output", "-o", help="Output directory for spec files (default: specs/<prefix.lower()>)"),
+    analyst_provider: str = typer.Option(None, "--analyst-provider", help="LLM provider for analyst role"),
+    analyst_model: str = typer.Option(None, "--analyst-model", help="Model name override for analyst"),
+):
+    """Analyze a product site and auto-generate Gherkin feature files."""
+    out_dir = output or Path("specs") / prefix.lower()
+
+    llm = LLMConfig.from_env(role="analyst")
+    if analyst_provider:
+        llm.provider = analyst_provider
+    if analyst_model:
+        llm.model = analyst_model
+
+    console.print(f"\n[bold]Analyzing:[/bold] {url}")
+    console.print(f"[dim]Provider: {llm.provider}/{llm.resolved_model()}  │  Output: {out_dir}[/dim]\n")
+
+    try:
+        result = asyncio.run(run_analysis(url, description, out_dir, prefix, llm))
+    except Exception as e:
+        console.print(f"[red]Analysis failed:[/red] {e}")
+        raise typer.Exit(2)
+
+    if result["complete"]:
+        console.print(
+            f"\n[green]✓[/green] {result['file_count']} files written to [bold]{out_dir}[/bold]"
+        )
+        console.print(f"[dim]Run tests: qa-agent run {out_dir}[/dim]")
+    else:
+        console.print(f"\n[yellow]⚠[/yellow] Analysis incomplete — {result['file_count']} files written")
+        raise typer.Exit(1)
 
 
 @app.command(name="show-report")

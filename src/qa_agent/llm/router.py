@@ -119,6 +119,10 @@ def ensure_provider_running(config: "LLMConfig") -> None:
 # ---------------------------------------------------------------------------
 
 _DEFAULTS = {
+    "analyst": {
+        "anthropic": "claude-opus-4-7",    # needs strong reasoning to synthesize spec structure
+        "ollama":    "qwen2.5:14b",        # not recommended; reasoning saturation on dense pages
+    },
     "executor": {
         "anthropic": "claude-sonnet-4-6",
         "ollama":    "qwen2.5:7b",
@@ -139,8 +143,8 @@ _DEFAULTS = {
 _LLM_TIMEOUT_DEFAULTS: dict = {
     "anthropic": 30,
     "ollama": {
-        "qwen2.5:14b": 60,   # ~23s/turn on M4 Pro GPU — 60s gives ample headroom
-        "qwen2.5:32b": 90,
+        "qwen2.5:14b": 90,   # ~23s/turn on M4 Pro GPU; 90s covers complex page snapshots
+        "qwen2.5:32b": 150,  # larger model, longer inference on M4 Pro
         "__default__": 120,  # qwen2.5:7b, llama3.1:8b, CPU inference
     },
 }
@@ -149,6 +153,7 @@ _TEST_TIMEOUT_DEFAULTS: dict = {
     "anthropic": None,
     "ollama": {
         "qwen2.5:14b": 180,  # 23s/turn × ~8 turns max on M4 Pro
+        "qwen2.5:32b": 600,  # larger model, slower inference
         "__default__": 360,  # qwen2.5:7b on CPU: ~60s/turn × 6 turns
     },
 }

@@ -26,24 +26,6 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 MAX_TURNS = 25
 
-# Hardcoded fallback for direct `python -m qa_agent.agent` invocation
-_HARDCODED_REQ = {
-    "id": "GB-002",
-    "title": "Lobby displays all required navigation buttons",
-    "priority": "high",
-    "given": "The app is loaded at the target URL",
-    "when": "The player views the lobby",
-    "then": (
-        "The Shop button is visible, "
-        "the Brawlers button is visible, "
-        "the GAMEMODES button is visible, "
-        "the PLAY button is visible, "
-        "the Quest button is visible, "
-        "and the Brawl Pass progress bar is visible"
-    ),
-}
-_TARGET_URL = "https://german-brawl.vercel.app/"
-
 # ---------------------------------------------------------------------------
 # Tool definitions (OpenAI format)
 # ---------------------------------------------------------------------------
@@ -754,12 +736,3 @@ async def run_requirement(
             }
 
 
-async def main() -> None:
-    config = LLMConfig.from_env(role="executor")
-    result = await run_requirement(_HARDCODED_REQ, _TARGET_URL, config)
-    import json as _json
-    print("\n" + _json.dumps(result, indent=2, ensure_ascii=False))
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

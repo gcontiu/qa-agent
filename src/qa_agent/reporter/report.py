@@ -8,10 +8,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from qa_agent.llm import LLMConfig
-
-_PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-
 
 def _actions_summary(actions_log: list[dict]) -> str:
     parts = []
@@ -23,7 +19,7 @@ def _actions_summary(actions_log: list[dict]) -> str:
     return " → ".join(parts) if parts else "—"
 
 
-def generate_report(results: list[dict], run_meta: dict, config: LLMConfig | None = None) -> str:
+def generate_report(results: list[dict], run_meta: dict) -> str:
     """Build a markdown report from results using a Python template. No LLM call."""
     name = run_meta.get("name", "Unknown")
     run_id = run_meta.get("run_id", "—")

@@ -135,14 +135,6 @@ _DEFAULTS = {
         "anthropic": "claude-haiku-4-5-20251001",
         "ollama":    "qwen2.5:7b",
     },
-    "reporter": {
-        "anthropic": "claude-haiku-4-5-20251001",
-        "ollama":    "qwen2.5:7b",
-    },
-    "planner": {
-        "anthropic": "claude-opus-4-7",
-        "ollama":    "qwen2.5:32b",
-    },
 }
 
 

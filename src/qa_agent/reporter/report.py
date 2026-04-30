@@ -1,46 +1,96 @@
 """
 Generates report.json + report.md for a completed run.
-Reporter uses LiteLLM — works with any provider (Anthropic, Ollama, etc.).
-Default: claude-haiku for Anthropic, qwen2.5:7b for Ollama.
+report.md is built from a deterministic Python template — no LLM involved.
+This guarantees consistent, correct output regardless of which LLM provider
+was used for testing.
 """
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from qa_agent.llm import LLMConfig, complete
+from qa_agent.llm import LLMConfig
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
-def _reporter_system() -> str:
-    return (_PROMPTS_DIR / "reporter_system.md").read_text()
+def _actions_summary(actions_log: list[dict]) -> str:
+    parts = []
+    for a in actions_log:
+        tool = a.get("tool", "")
+        inp = a.get("input", {})
+        key_arg = inp.get("url") or inp.get("ref") or inp.get("text") or inp.get("value") or ""
+        parts.append(f"{tool}({key_arg})" if key_arg else tool)
+    return " → ".join(parts) if parts else "—"
 
 
-def generate_report(
-    results: list[dict],
-    run_meta: dict,
-    config: LLMConfig | None = None,
-) -> str:
-    """Call the configured LLM to produce a markdown report. Returns markdown string."""
-    if config is None:
-        config = LLMConfig.from_env(role="reporter")
+def generate_report(results: list[dict], run_meta: dict, config: LLMConfig | None = None) -> str:
+    """Build a markdown report from results using a Python template. No LLM call."""
+    name = run_meta.get("name", "Unknown")
+    run_id = run_meta.get("run_id", "—")
+    url = run_meta.get("url", "—")
+    date = run_meta.get("started_at", "—")
 
-    user_content = (
-        f"Product: {run_meta.get('name', 'Unknown')}\n"
-        f"Run ID: {run_meta['run_id']}\n"
-        f"Target: {run_meta['url']}\n"
-        f"Date: {run_meta['started_at']}\n\n"
-        f"Results:\n{json.dumps(results, indent=2, ensure_ascii=False)}"
-    )
-    response = complete(
-        config,
-        messages=[
-            {"role": "system", "content": _reporter_system()},
-            {"role": "user", "content": user_content},
-        ],
-        max_tokens=2048,
-    )
-    return response.choices[0].message.content
+    passed = sum(1 for r in results if r.get("status") == "pass")
+    failed = len(results) - passed
+
+    lines = [
+        f"# QA Report — {name}",
+        f"**Run:** {run_id}  |  **Target:** {url}  |  **Date:** {date}",
+        "",
+        "## Summary",
+        "| Total | Passed | Failed |",
+        "|-------|--------|--------|",
+        f"| {len(results)} | {passed} | {failed} |",
+        "",
+        "## Results",
+        "",
+    ]
+
+    failures = []
+    for r in results:
+        status = r.get("status", "fail")
+        is_pass = status == "pass"
+        icon = "✓" if is_pass else "✗"
+        req_id = r.get("id", "")
+        title = r.get("title", "")
+        actual = r.get("actual", "")
+
+        lines.append(f"### {icon} {req_id} — {title}  `{'PASS' if is_pass else 'FAIL'}`")
+        lines.append(f"**Actual:** {actual}")
+
+        if not is_pass:
+            reasoning = r.get("reasoning", "")
+            expected = r.get("then", "")
+            actions = _actions_summary(r.get("actions_log", []))
+            lines.append(f"**Expected (Then):** {expected}")
+            lines.append(f"**Reasoning:** {reasoning}")
+            lines.append(f"**Actions taken:** {actions}")
+            failures.append(r)
+
+        lines.append("")
+
+    if failures:
+        lines += ["---", "## Failed requirements", ""]
+        for r in failures:
+            req_id = r.get("id", "")
+            title = r.get("title", "")
+            actual = r.get("actual", "")
+            reasoning = r.get("reasoning", "")
+            expected = r.get("then", "")
+            actions = _actions_summary(r.get("actions_log", []))
+            lines += [
+                f"### ✗ {req_id} — {title}",
+                f"**Actual:** {actual}",
+                f"**Expected (Then):** {expected}",
+                f"**Reasoning:** {reasoning}",
+                f"**Actions taken:** {actions}",
+                "",
+            ]
+
+    verdict = "All requirements passed." if failed == 0 else f"{failed} requirement(s) failed and require attention."
+    lines.append(f"Overall verdict: {verdict}")
+
+    return "\n".join(lines)
 
 
 def write_run(
@@ -93,12 +143,8 @@ def write_run(
         json.dumps(report_json, indent=2, ensure_ascii=False)
     )
 
-    # --- report.md (via LLM) ---
-    reporter_config = LLMConfig.from_env(role="reporter")
-    try:
-        md = generate_report(results, run_meta, reporter_config)
-    except Exception as e:
-        md = f"# QA Report\n\nReport generation failed: {e}\n"
+    # --- report.md (deterministic template, no LLM) ---
+    md = generate_report(results, run_meta)
     (run_dir / "report.md").write_text(md)
 
     # --- telemetry.json ---
@@ -106,12 +152,11 @@ def write_run(
     total_duration = sum(r.get("duration_s", 0) for r in results)
     telemetry = {
         "run_id": run_id,
-        "reporter_provider": reporter_config.provider,
-        "reporter_model": reporter_config.resolved_model(),
         "total_actions": total_actions,
         "total_duration_s": round(total_duration, 1),
         "requirements_count": len(results),
         "avg_actions_per_requirement": round(total_actions / max(len(results), 1), 1),
+        "report_generated_by": "template",
     }
     (run_dir / "telemetry.json").write_text(
         json.dumps(telemetry, indent=2, ensure_ascii=False)

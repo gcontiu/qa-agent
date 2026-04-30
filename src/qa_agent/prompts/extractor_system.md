@@ -23,3 +23,4 @@ Fields:
 - If the evidence is ambiguous or insufficient to determine pass/fail, choose `"fail"` and explain what was missing.
 - Keep `actual` and `reasoning` concise — one sentence each.
 - Never output anything outside the JSON object.
+- **Always write `actual` and `reasoning` in English**, regardless of the language of the page content or the test requirement.

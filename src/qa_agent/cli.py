@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
-from qa_agent.agent import run_requirement
+from qa_agent.agent import preflight_check, run_requirement
 from qa_agent.analyst import run_analysis
 from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
@@ -137,6 +137,13 @@ def run(
 
     console.print(f"\n[bold]{bundle.config.name}[/bold]  [dim]{url}[/dim]")
     console.print(f"[dim]{len(requirements)} requirements  │  executor: {llm.provider}/{llm.resolved_model()}[/dim]\n")
+
+    try:
+        asyncio.run(preflight_check())
+    except RuntimeError as e:
+        console.print(f"[red]Preflight failed:[/red] {e}")
+        store.close()
+        raise typer.Exit(2)
 
     try:
         results = asyncio.run(_execute_requirements(requirements, url, llm))

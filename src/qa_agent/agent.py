@@ -7,6 +7,7 @@ Usage: uv run python -m qa_agent.agent
 import asyncio
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -125,6 +126,80 @@ def _user_message(req: dict, url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Playwright MCP server params (shared by executor and preflight)
+# ---------------------------------------------------------------------------
+
+def _make_server_params() -> StdioServerParameters:
+    """Build MCP server launch params. Browser is configurable via QA_BROWSER."""
+    browser = os.getenv("QA_BROWSER", "chromium")
+    return StdioServerParameters(
+        command="npx",
+        args=["@playwright/mcp@latest", "--headless", "--isolated", f"--browser={browser}"],
+    )
+
+
+async def preflight_check() -> None:
+    """Verify npx, Playwright MCP tools, and the browser are all available.
+
+    Raises RuntimeError with a human-readable fix hint on any failure.
+    Three steps:
+      1. (sync)  npx in PATH — Node.js installed?
+      2. (async) MCP session starts + all essential tools present
+      3. (async) browser_navigate("about:blank") — browser actually launches?
+    """
+    console = Console()
+    console.rule("[bold]Preflight check[/bold]")
+
+    # Step 1 — npx available
+    if not shutil.which("npx"):
+        console.print("[red]✗[/red] npx not found in PATH")
+        raise RuntimeError("npx not found — install Node.js (https://nodejs.org)")
+    console.print("[green]✓[/green] npx found")
+
+    # Steps 2 + 3 — single MCP session
+    browser = os.getenv("QA_BROWSER", "chromium")
+    server_params = _make_server_params()
+
+    try:
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+
+                # Step 2 — tool discovery
+                mcp_tools = await session.list_tools()
+                available = {t.name for t in mcp_tools.tools}
+                missing = _ESSENTIAL_TOOLS - available
+                if missing:
+                    console.print(f"[red]✗[/red] Missing essential tools: {missing}")
+                    raise RuntimeError(f"MCP server missing tools: {missing}")
+                console.print(
+                    f"[green]✓[/green] {len(mcp_tools.tools)} tools available "
+                    f"({len(_ESSENTIAL_TOOLS)}/{len(_ESSENTIAL_TOOLS)} essential present)"
+                )
+
+                # Step 3 — real browser launch
+                nav_result = await session.call_tool("browser_navigate", {"url": "about:blank"})
+                nav_text = "\n".join(
+                    c.text for c in nav_result.content if hasattr(c, "text")
+                )
+                if "not installed" in nav_text.lower():
+                    console.print(f"[red]✗[/red] Browser '{browser}' not available")
+                    console.print(
+                        f"[dim]  Fix: npx @playwright/mcp install-browser {browser}[/dim]"
+                    )
+                    raise RuntimeError(f"Browser '{browser}' not installed: {nav_text[:200]}")
+                console.print(f"[green]✓[/green] Browser '{browser}' responsive")
+
+    except RuntimeError:
+        raise
+    except Exception as e:
+        console.print(f"[red]✗[/red] MCP server failed to start: {e}")
+        raise RuntimeError(f"Playwright MCP failed: {e}") from e
+
+    console.print("[bold green]Preflight passed.[/bold green]\n")
+
+
+# ---------------------------------------------------------------------------
 # Main executor
 # ---------------------------------------------------------------------------
 
@@ -160,10 +235,7 @@ async def run_requirement(
     console.print(f"[dim]Then: [/dim] {req['then']}")
     console.print()
 
-    server_params = StdioServerParameters(
-        command="npx",
-        args=["@playwright/mcp@latest", "--headless", "--isolated", "--browser=chromium"],
-    )
+    server_params = _make_server_params()
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -204,16 +276,20 @@ async def run_requirement(
                 messages.append({"role": "tool", "tool_call_id": boot_id, "content": nav_text})
                 actions_log.append({"tool": "browser_navigate", "input": {"url": url}})
 
-                # Variant B: also snapshot so the model has page context and refs at turn 0
-                console.print(f"  [dim cyan]→ browser_snapshot({{}}) [bootstrap][/dim cyan]")
-                snap_result = await session.call_tool("browser_snapshot", {})
+                # Variant B: also snapshot so the model has page context and refs at turn 0.
+                # depth=5 caps the accessibility tree to avoid overwhelming the model on
+                # complex pages (large sites produce 10k+ token snapshots without a limit).
+                snap_depth = int(os.getenv("QA_BOOTSTRAP_DEPTH", "5"))
+                snap_args = {"depth": snap_depth}
+                console.print(f"  [dim cyan]→ browser_snapshot(depth={snap_depth}) [bootstrap][/dim cyan]")
+                snap_result = await session.call_tool("browser_snapshot", snap_args)
                 snap_text = "\n".join(c.text for c in snap_result.content if hasattr(c, "text"))
                 boot_snap_id = "bootstrap_snap_0"
                 messages.append({
                     "role": "assistant",
                     "tool_calls": [{
                         "id": boot_snap_id, "type": "function",
-                        "function": {"name": "browser_snapshot", "arguments": json.dumps({})},
+                        "function": {"name": "browser_snapshot", "arguments": json.dumps(snap_args)},
                     }],
                 })
                 messages.append({"role": "tool", "tool_call_id": boot_snap_id, "content": snap_text})

@@ -16,11 +16,12 @@ import json
 import time
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 from rich.console import Console
 from rich.panel import Panel
 
+from qa_agent.agent import _make_server_params
 from qa_agent.llm import LLMConfig, complete, ensure_provider_running
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -137,10 +138,7 @@ async def run_analysis(
     )
     console.print(f"[dim]Prefix: {spec_prefix}  │  Output: {output_dir}[/dim]\n")
 
-    server_params = StdioServerParameters(
-        command="npx",
-        args=["@playwright/mcp@latest", "--headless", "--isolated", "--browser=chromium"],
-    )
+    server_params = _make_server_params()
 
     written_files: dict[str, str] = {}
     finished: dict | None = None

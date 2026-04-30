@@ -110,8 +110,11 @@ def _system_prompt() -> str:
     return (PROMPTS_DIR / "executor_system.md").read_text()
 
 
-def _user_message(req: dict, url: str) -> str:
-    return (
+def _user_message(req: dict, url: str, context: str = "") -> str:
+    parts = []
+    if context:
+        parts.append(f"Product context:\n{context.strip()}\n")
+    parts.append(
         f"Test Requirement:\n"
         f"ID: {req['id']}\n"
         f"Title: {req['title']}\n"
@@ -123,6 +126,125 @@ def _user_message(req: dict, url: str) -> str:
         f"Navigate to the target URL and execute the requirement. "
         f"Call report_result when you have a verdict."
     )
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Verdict extraction (last-resort fallback when report_result is never called)
+# ---------------------------------------------------------------------------
+
+def _prune_for_verdict(messages: list[dict]) -> list[dict]:
+    """Reduce conversation history to the essential context for verdict extraction.
+
+    Keeps the system prompt, the original user requirement, a summary of which
+    browser tools were called, and the last meaningful snapshot result.
+    Discards intermediate snapshots, ghost retry loops, and error messages so
+    the extractor receives a focused, cheap-to-process context.
+    """
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    user_requirement = next((m for m in messages if m.get("role") == "user"), None)
+
+    # Collect ordered action names from assistant tool_calls
+    actions: list[str] = []
+    for m in messages:
+        if m.get("role") == "assistant":
+            for tc in m.get("tool_calls") or []:
+                name = (tc.get("function") or {}).get("name", "")
+                if name and name not in ("report_result",):
+                    try:
+                        args = json.loads((tc.get("function") or {}).get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    url = args.get("url", "")
+                    actions.append(f"{name}({url})" if url else name)
+
+    # Last non-trivial tool result (the most recent snapshot the model saw)
+    last_snapshot_content: str | None = None
+    for m in reversed(messages):
+        if m.get("role") == "tool":
+            content = m.get("content", "")
+            if isinstance(content, str) and len(content) > 50:
+                last_snapshot_content = content
+                break
+
+    pruned: list[dict] = list(system_msgs)
+    if user_requirement:
+        pruned.append(user_requirement)
+
+    context_parts: list[str] = []
+    if actions:
+        context_parts.append(f"Actions taken: {' → '.join(actions[:15])}")
+    if last_snapshot_content:
+        context_parts.append(f"Last page state observed:\n{last_snapshot_content[:4000]}")
+
+    if context_parts:
+        pruned.append({"role": "user", "content": "\n\n".join(context_parts)})
+
+    return pruned
+
+
+async def _extract_verdict(
+    executor_config: LLMConfig,
+    messages: list[dict],
+    then_clause: str,
+    console: Console,
+) -> dict | None:
+    """Last-resort verdict extraction using structured JSON output.
+
+    Called when the executor loop ends without a report_result call and all
+    ghost fallbacks (A-G) have failed to parse a verdict.
+
+    Uses a dedicated `extractor` role (defaulting to the same provider as the
+    executor but a cheaper/faster model) with response_format=json_object so the
+    provider enforces valid JSON output regardless of model instruction-following.
+
+    Returns a verdict dict {status, actual, reasoning} or None if extraction fails.
+    """
+    extractor_config = LLMConfig.from_env(role="extractor")
+
+    # If the user hasn't explicitly configured a separate extractor provider,
+    # inherit the executor's provider so a local-only run stays local.
+    if not os.getenv("QA_EXTRACTOR_PROVIDER"):
+        extractor_config.provider = executor_config.provider
+        if not os.getenv("QA_EXTRACTOR_MODEL"):
+            extractor_config.model = None  # use extractor role default for this provider
+
+    console.print(
+        f"[dim yellow]Verdict extraction fallback "
+        f"({extractor_config.provider}/{extractor_config.resolved_model()})[/dim yellow]"
+    )
+
+    pruned = _prune_for_verdict(messages)
+    pruned.append({
+        "role": "user",
+        "content": (
+            f"Then clause to verify:\n{then_clause}\n\n"
+            "Based ONLY on the evidence above, respond with JSON: "
+            '{"status": "pass" or "fail", "actual": "...", "reasoning": "..."}'
+        ),
+    })
+
+    try:
+        response = complete(
+            extractor_config,
+            pruned,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+        )
+        content = (response.choices[0].message.content or "").strip()
+        parsed = json.loads(content)
+        if (
+            isinstance(parsed, dict)
+            and parsed.get("status") in ("pass", "fail")
+            and "actual" in parsed
+            and "reasoning" in parsed
+        ):
+            return parsed
+        console.print(f"[dim red]Extractor returned unexpected shape: {content[:100]}[/dim red]")
+    except Exception as e:
+        console.print(f"[dim red]Verdict extraction error: {e}[/dim red]")
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +336,7 @@ async def run_requirement(
     url: str,
     config: LLMConfig | None = None,
     test_timeout: int | None = ...,  # type: ignore[assignment]
+    context: str = "",
 ) -> dict:
     if config is None:
         config = LLMConfig.from_env(role="executor")
@@ -256,7 +379,7 @@ async def run_requirement(
 
             messages: list[dict] = [
                 {"role": "system", "content": _system_prompt()},
-                {"role": "user", "content": _user_message(req, url)},
+                {"role": "user", "content": _user_message(req, url, context)},
             ]
 
             actions_log: list[dict] = []
@@ -547,11 +670,15 @@ async def run_requirement(
                     console.print(
                         "[yellow]Warning: agent stopped without calling report_result[/yellow]"
                     )
-                    verdict = {
-                        "status": "fail",
-                        "actual": content_str or "No output",
-                        "reasoning": "report_result was never called",
-                    }
+                    verdict = await _extract_verdict(
+                        config, messages, req.get("then", ""), console
+                    )
+                    if not verdict:
+                        verdict = {
+                            "status": "fail",
+                            "actual": content_str or "No output",
+                            "reasoning": "report_result was never called — extraction also failed",
+                        }
                     break
 
                 tool_results: list[dict] = []

@@ -120,11 +120,19 @@ def ensure_provider_running(config: "LLMConfig") -> None:
 
 _DEFAULTS = {
     "analyst": {
-        "anthropic": "claude-opus-4-7",    # needs strong reasoning to synthesize spec structure
-        "ollama":    "qwen2.5:14b",        # not recommended; reasoning saturation on dense pages
+        "anthropic": "claude-opus-4-7",        # needs strong reasoning to synthesize spec structure
+        "ollama":    "qwen2.5:14b",            # not recommended; reasoning saturation on dense pages
     },
     "executor": {
         "anthropic": "claude-sonnet-4-6",
+        "ollama":    "qwen2.5:7b",
+    },
+    "extractor": {
+        # Verdict extraction: simple classification task, cheapest capable model per provider.
+        # Defaults to the same provider as executor (via QA_PROVIDER fallback), so a purely
+        # local run stays local and a purely Anthropic run stays Anthropic.
+        # Override with QA_EXTRACTOR_PROVIDER / QA_EXTRACTOR_MODEL to decouple.
+        "anthropic": "claude-haiku-4-5-20251001",
         "ollama":    "qwen2.5:7b",
     },
     "reporter": {
@@ -222,11 +230,17 @@ def complete(
     messages: list[dict],
     tools: list[dict] | None = None,
     max_tokens: int = 2048,
+    response_format: dict | None = None,
 ):
     """
     Unified LLM call. Returns a LiteLLM ModelResponse (OpenAI-compatible).
     messages must be in OpenAI format (role/content, tool role for results).
     tools must be in OpenAI function format.
+    response_format: optional structured output spec, e.g. {"type": "json_object"}.
+      LiteLLM translates to the target provider's native format transparently:
+      - Anthropic → structured output / tool with schema
+      - Ollama    → {"format": "json"} in the request body
+      - OpenAI / Together.ai → passed through as-is
     """
     kwargs: dict = dict(
         model=config.litellm_model(),
@@ -243,5 +257,8 @@ def complete(
         tc = os.getenv("QA_TOOL_CHOICE", "").lower()
         if tc == "required":
             kwargs["tool_choice"] = "required"
+
+    if response_format:
+        kwargs["response_format"] = response_format
 
     return litellm.completion(**kwargs)

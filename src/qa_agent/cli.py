@@ -26,10 +26,12 @@ _STATE_DB = Path("reports/.state/runs.db")
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _execute_requirements(requirements, url: str, llm: LLMConfig) -> list[dict]:
+async def _execute_requirements(
+    requirements, url: str, llm: LLMConfig, context: str = ""
+) -> list[dict]:
     results = []
     for req in requirements:
-        result = await run_requirement(req.to_executor_dict(), url, llm)
+        result = await run_requirement(req.to_executor_dict(), url, llm, context=context)
         results.append(result)
         console.print()
     return results
@@ -146,7 +148,9 @@ def run(
         raise typer.Exit(2)
 
     try:
-        results = asyncio.run(_execute_requirements(requirements, url, llm))
+        results = asyncio.run(
+            _execute_requirements(requirements, url, llm, context=bundle.config.context)
+        )
     except Exception as e:
         console.print(f"[red]Unexpected error:[/red] {e}")
         store.close()

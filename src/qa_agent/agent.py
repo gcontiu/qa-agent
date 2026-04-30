@@ -177,17 +177,20 @@ async def preflight_check() -> None:
                     f"({len(_ESSENTIAL_TOOLS)}/{len(_ESSENTIAL_TOOLS)} essential present)"
                 )
 
-                # Step 3 — real browser launch
-                nav_result = await session.call_tool("browser_navigate", {"url": "about:blank"})
+                # Step 3 — real browser launch via HTTP (about:blank skips actual browser init)
+                nav_result = await session.call_tool(
+                    "browser_navigate", {"url": "https://playwright.dev"}
+                )
                 nav_text = "\n".join(
                     c.text for c in nav_result.content if hasattr(c, "text")
                 )
-                if "not installed" in nav_text.lower():
+                _browser_error_markers = ("not installed", "is not found", "not found", "cannot find")
+                if any(m in nav_text.lower() for m in _browser_error_markers):
                     console.print(f"[red]✗[/red] Browser '{browser}' not available")
                     console.print(
                         f"[dim]  Fix: npx @playwright/mcp install-browser {browser}[/dim]"
                     )
-                    raise RuntimeError(f"Browser '{browser}' not installed: {nav_text[:200]}")
+                    raise RuntimeError(f"Browser '{browser}' not available: {nav_text[:200]}")
                 console.print(f"[green]✓[/green] Browser '{browser}' responsive")
 
     except RuntimeError:

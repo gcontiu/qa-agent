@@ -34,21 +34,22 @@ The `npx playwright install chromium` step downloads the Chromium headless shell
 
 | Variable | Default | Description |
 |---|---|---|
-| `QA_PROVIDER` | `anthropic` | LLM provider for all roles (`anthropic`, `ollama`) |
+| `QA_PROVIDER` | `anthropic` | LLM provider for all roles (`anthropic`, `ollama`, `together_ai`) |
 | `QA_MODEL` | _(role default)_ | Model name override for all roles |
 | `QA_EXECUTOR_PROVIDER` | `QA_PROVIDER` | Provider for the executor role only |
 | `QA_EXECUTOR_MODEL` | _(role default)_ | Model for the executor role only |
 | `QA_EXTRACTOR_PROVIDER` | executor's provider | Provider for verdict extraction |
 | `QA_EXTRACTOR_MODEL` | _(role default)_ | Model for verdict extraction |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `TOGETHER_API_KEY` | _(required for together_ai)_ | Together.ai API key |
 
 Default models per role:
 
-| Role | Anthropic | Ollama |
-|---|---|---|
-| executor | `claude-sonnet-4-6` | `qwen2.5:7b` |
-| extractor | `claude-haiku-4-5-20251001` | `qwen2.5:7b` |
-| analyst | `claude-opus-4-7` | `qwen2.5:14b` |
+| Role | Anthropic | Together.ai | Ollama |
+|---|---|---|---|
+| executor | `claude-sonnet-4-6` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `qwen2.5:7b` |
+| extractor | `claude-haiku-4-5-20251001` | `Qwen/Qwen2.5-7B-Instruct-Turbo` | `qwen2.5:7b` |
+| analyst | `claude-opus-4-7` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `qwen2.5:14b` |
 
 ### Timeouts
 
@@ -102,27 +103,32 @@ Per-model LLM timeout defaults (Ollama):
 # Anthropic (default) — full alconind suite
 uv run qa-agent run specs/alconind --output reports/alconind-full
 
+# Together.ai — Starter tier candidate (Llama 3.3 70B)
+QA_EXECUTOR_PROVIDER=together_ai \
+QA_VERBOSE_LLM=true \
+uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-together-70b
+
+# Together.ai — Free tier candidate (Qwen 2.5 7B Turbo)
+QA_EXECUTOR_PROVIDER=together_ai \
+QA_EXECUTOR_MODEL=Qwen/Qwen2.5-7B-Instruct-Turbo \
+QA_VERBOSE_LLM=true \
+uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-together-7b
+
 # Ollama — smoke test with mistral-small:22b
 QA_EXECUTOR_PROVIDER=ollama \
 QA_EXECUTOR_MODEL=mistral-small:22b \
-QA_BOOTSTRAP_DEPTH=3 \
+QA_BOOTSTRAP_DEPTH=6 \
 QA_VERBOSE_LLM=true \
 uv run qa-agent run specs/alconind-smoke
-
-# Hybrid — Anthropic executor + Ollama planner/reporter (~75% cheaper)
-QA_EXECUTOR_PROVIDER=anthropic \
-QA_PLANNER_PROVIDER=ollama QA_PLANNER_MODEL=qwen2.5:14b \
-QA_REPORTER_PROVIDER=ollama QA_REPORTER_MODEL=qwen2.5:7b \
-uv run qa-agent run specs/alconind --output reports/alconind-hybrid
 
 # Re-run only failures from last run
 uv run qa-agent run specs/alconind --only-failing
 
 # Ollama debug — verbose LLM output, slim tools, reduced snapshot depth
 QA_EXECUTOR_PROVIDER=ollama \
-QA_EXECUTOR_MODEL=qwen2.5:14b \
+QA_EXECUTOR_MODEL=mistral-small:22b \
 QA_FORCE_SLIM=true \
-QA_BOOTSTRAP_DEPTH=3 \
+QA_BOOTSTRAP_DEPTH=4 \
 QA_VERBOSE_LLM=true \
 uv run qa-agent run specs/alconind-smoke
 ```

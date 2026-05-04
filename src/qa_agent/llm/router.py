@@ -121,20 +121,23 @@ def ensure_provider_running(config: "LLMConfig") -> None:
 
 _DEFAULTS = {
     "analyst": {
-        "anthropic": "claude-opus-4-7",        # needs strong reasoning to synthesize spec structure
-        "ollama":    "qwen2.5:14b",            # not recommended; reasoning saturation on dense pages
+        "anthropic":   "claude-opus-4-7",
+        "ollama":      "qwen2.5:14b",             # not recommended; reasoning saturation on dense pages
+        "together_ai": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     },
     "executor": {
-        "anthropic": "claude-sonnet-4-6",
-        "ollama":    "qwen2.5:7b",
+        "anthropic":   "claude-sonnet-4-6",
+        "ollama":      "qwen2.5:7b",
+        "together_ai": "meta-llama/Llama-3.3-70B-Instruct-Turbo",  # Starter tier
     },
     "extractor": {
         # Verdict extraction: simple classification task, cheapest capable model per provider.
         # Defaults to the same provider as executor (via QA_PROVIDER fallback), so a purely
-        # local run stays local and a purely Anthropic run stays Anthropic.
+        # local run stays local and a purely remote run stays remote.
         # Override with QA_EXTRACTOR_PROVIDER / QA_EXTRACTOR_MODEL to decouple.
-        "anthropic": "claude-haiku-4-5-20251001",
-        "ollama":    "qwen2.5:7b",
+        "anthropic":   "claude-haiku-4-5-20251001",
+        "ollama":      "qwen2.5:7b",
+        "together_ai": "Qwen/Qwen2.5-7B-Instruct-Turbo",           # cheap + fast for classification
     },
 }
 
@@ -143,16 +146,21 @@ _DEFAULTS = {
 # "__default__" covers any model not explicitly listed.
 _LLM_TIMEOUT_DEFAULTS: dict = {
     "anthropic": 30,
+    "together_ai": {
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo": 60,  # cloud GPU, ~5-10s/turn
+        "__default__": 30,                               # smaller models even faster
+    },
     "ollama": {
-        "qwen2.5:14b":      90,   # ~23s/turn on M4 Pro GPU
-        "qwen2.5:32b":      150,  # larger model, longer inference on M4 Pro
-        "mistral-small:22b": 300, # 12GB + large KV cache saturates M4 Pro bandwidth; first post-snapshot call is slow
-        "__default__":      120,  # qwen2.5:7b, llama3.1:8b, CPU inference
+        "qwen2.5:14b":       90,   # ~23s/turn on M4 Pro GPU
+        "qwen2.5:32b":      150,   # larger model, longer inference on M4 Pro
+        "mistral-small:22b": 300,  # 12GB + large KV cache saturates M4 Pro bandwidth
+        "__default__":       120,  # qwen2.5:7b, llama3.1:8b, CPU inference
     },
 }
 
 _TEST_TIMEOUT_DEFAULTS: dict = {
-    "anthropic": None,
+    "anthropic":   None,
+    "together_ai": None,  # cloud inference — no per-test cap needed
     "ollama": {
         "qwen2.5:14b": 180,  # 23s/turn × ~8 turns max on M4 Pro
         "qwen2.5:32b": 600,  # larger model, slower inference
@@ -217,6 +225,8 @@ class LLMConfig:
             return m if m.startswith("claude") else f"anthropic/{m}"
         if self.provider == "ollama":
             return f"ollama/{m}"
+        if self.provider == "together_ai":
+            return f"together_ai/{m}"
         return m
 
     def extra_kwargs(self) -> dict:

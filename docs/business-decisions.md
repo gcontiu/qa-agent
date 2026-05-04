@@ -37,18 +37,18 @@ Meta's latest instruction model, explicitly trained for tool use. Expected to em
 **Why Qwen 2.5 7B Turbo for Free/Extractor:**
 Cost-optimized for simple tasks. High token throughput. Trade-off: may fall back to Ghost-B on dense pages — acceptable on free tier.
 
-**Why Anthropic stays on Pro:**
-Empirical data shows 100% pass rate on complex marketing sites vs unknown reliability for open-weight models at cloud scale. Pro customers pay for reliability.
+**Why Anthropic stays on Pro and Starter:**
+Empirical data shows 100% pass rate on complex marketing sites. Anthropic Sonnet at ~$0.21/run is also cheaper per run than Together.ai Llama 70B (~$0.37/run), making it the better choice on both quality AND cost for paid tiers.
 
-### Economics
+**Revised tier mapping (updated 2026-05-04):**
 
-| Tier | Price | Runs/month | LLM cost | Gross margin |
-|------|-------|------------|----------|--------------|
-| Free | $0 | 5 | ~$0.20 | -$0.20/user (acquisition) |
-| Starter | $19 | 50 | ~$18.50 | ~$0.50 + infra |
-| Pro | $49 | 200 | ~$42 | ~$7 + infra |
+| Tier | Provider | Model | Cost/run | Revenue | Gross margin |
+|------|----------|-------|----------|---------|--------------|
+| Free (5 runs/mo) | Together.ai | Qwen 2.5 7B Turbo | ~$0.04 | $0 | -$0.20 (acquisition) |
+| Starter ($19/mo, 50 runs) | **Anthropic** | claude-sonnet-4-6 | ~$0.21 | $19 | ~$8.50 |
+| Pro ($49/mo, 200 runs) | Anthropic | claude-sonnet-4-6 | ~$0.21 | $49 | ~$7 |
 
-Starter becomes near break-even instead of a loss leader. This enables growth without burning capital on every new user.
+**Key correction from original roadmap:** Llama 3.3 70B on Together.ai (~$0.37/run) is more expensive than Anthropic Sonnet (~$0.21/run) and less reliable (no self-recovery from navigation loops). There is no economic or quality argument for using it on paid tiers. Together.ai remains relevant only for the Free tier (Qwen 7B Turbo at ~$0.04/run) and as a BYOK option.
 
 ### Implementation plan
 

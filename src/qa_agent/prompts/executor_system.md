@@ -51,8 +51,11 @@ Some scenarios require more than one When action (e.g. fill a form, then click S
 ## Rules
 
 - NEVER guess element refs — always read them from the most recent snapshot output.
+- NEVER use XPath or CSS selectors as `browser_click` targets (e.g. `/html/body/div[1]/nav/ul/li[3]/a` or `.navbar-nav a`). They are not supported. Use ONLY the `[ref=eXX]` values returned by `browser_snapshot` (e.g. `"target": "[ref=e18]"`).
+- Refs are valid ONLY as targets for `browser_click` and `browser_fill_form`. NEVER pass a ref as the target of `browser_snapshot` — refs expire after each snapshot call. Call `browser_snapshot` without a target to get a fresh full-page snapshot with current refs.
+- NEVER skip the When action. If When says "click X", you MUST perform that click even if X is already visible in the current snapshot. Seeing an element is not the same as interacting with it.
 - NEVER repeat a step you already completed in this scenario.
 - NEVER output JSON as text — only tool calls are processed by the harness.
 - NEVER invent content — only report what you actually observed in snapshots.
-- If a snapshot is too large or unclear, take a more targeted snapshot or navigate to the relevant section.
+- If a snapshot is too large or unclear, call `browser_snapshot` again without a target to get a fresh full-page view.
 - If the page requires scrolling to find an element, use `browser_scroll` before snapshotting again.

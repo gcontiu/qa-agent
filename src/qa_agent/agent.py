@@ -7,6 +7,7 @@ Usage: uv run python -m qa_agent.agent
 import asyncio
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from rich.console import Console
+from rich.markup import escape as _esc_markup
 from rich.panel import Panel
 from rich.text import Text
 
@@ -87,6 +89,100 @@ def _mcp_to_openai_tools(tools_result, slim: bool = False) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Prompt helpers
 # ---------------------------------------------------------------------------
+
+def _extract_given_url(given: str, base_url: str) -> str:
+    """Return base_url+path if the Given clause names a specific URL path, else base_url.
+
+    Matches Romanian/English patterns: 'la URL-ul /path', 'at URL /path', 'URL /path'.
+    """
+    match = re.search(r'(?:url[- ]ul\s+|url\s+)(/[^\s,\.]+)', given, re.IGNORECASE)
+    if match:
+        return base_url.rstrip('/') + match.group(1)
+    return base_url
+
+
+# ---------------------------------------------------------------------------
+# When-action guardrail
+# ---------------------------------------------------------------------------
+
+_WHEN_ACTION_PATTERNS: list[tuple[str, list[str]]] = [
+    (r'\bapas[aă]\b',          ["browser_click"]),
+    (r'\bclick\b',             ["browser_click"]),
+    (r'\bda\s+click\b',        ["browser_click"]),
+    (r'\bcomplet[eă]az[aă]\b', ["browser_type", "browser_fill_form"]),
+    (r'\bintroduce\b',         ["browser_type", "browser_fill_form"]),
+    (r'\btasteaz[aă]\b',       ["browser_type"]),
+    (r'\bselecte[ae]z[aă]\b',  ["browser_select_option"]),
+    (r'\btrimite\b',           ["browser_click"]),
+    (r'\bsubmit\b',            ["browser_click"]),
+    (r'\bapas[aă]\s+tasta\b',  ["browser_press_key"]),
+    (r'\bclicks?\b',           ["browser_click"]),
+    (r'\bfills?\b',            ["browser_type", "browser_fill_form"]),
+    (r'\btypes?\b',            ["browser_type"]),
+    (r'\bselects?\b',          ["browser_select_option"]),
+    (r'\bsubmits?\b',          ["browser_click"]),
+    (r'\bpresses?\b',          ["browser_press_key"]),
+]
+
+_MAX_WHEN_RETRIES = 2
+
+
+def _required_tools_for_when(when: str) -> list[str]:
+    """Return tool names that must appear in actions before a PASS verdict."""
+    lower = when.lower()
+    required: set[str] = set()
+    for pattern, tools in _WHEN_ACTION_PATTERNS:
+        if re.search(pattern, lower):
+            required.update(tools)
+    return list(required)
+
+
+def _when_guardrail(
+    verdict_candidate: dict,
+    req: dict,
+    model_tool_names: list[str],
+    guard_count: int,
+) -> tuple[dict | None, int, str | None]:
+    """Validate that required When actions were performed before accepting a PASS verdict.
+
+    Returns:
+      (verdict, count, None)       — accepted
+      (None, count+1, message)     — blocked; caller injects message and continues
+      (error_dict, count, None)    — retry budget exhausted; treated as FAIL
+    """
+    if verdict_candidate.get("status") != "pass":
+        return verdict_candidate, guard_count, None
+
+    when = req.get("when", "").strip()
+    if not when:
+        return verdict_candidate, guard_count, None
+
+    required = _required_tools_for_when(when)
+    if not required:
+        return verdict_candidate, guard_count, None
+
+    if set(model_tool_names) & set(required):
+        return verdict_candidate, guard_count, None
+
+    if guard_count >= _MAX_WHEN_RETRIES:
+        return {
+            "status": "fail",
+            "actual": f"When action was never performed ('{when}').",
+            "reasoning": (
+                f"Guardrail: When clause requires {required} but model reported PASS "
+                "without performing it — retry budget exhausted."
+            ),
+        }, guard_count, None
+
+    correction = (
+        f"report_result was blocked by the When-action guardrail.\n"
+        f"The When clause requires you to perform: '{when}'\n\n"
+        f"You must call {' or '.join(required)} before reporting a verdict. "
+        "The page is already loaded — find the element ref in the snapshot above "
+        "and perform the action. Then call report_result with your final verdict."
+    )
+    return None, guard_count + 1, correction
+
 
 def _system_prompt() -> str:
     return (PROMPTS_DIR / "executor_system.md").read_text()
@@ -365,24 +461,28 @@ async def run_requirement(
             ]
 
             actions_log: list[dict] = []
+            guard_count = 0
+            pending_correction: str | None = None
 
             # Bootstrap: pre-navigate for providers that struggle to initiate tool calls.
             # Injects browser_navigate as a completed turn so the model starts mid-stream.
-            # Disable with QA_NO_BOOTSTRAP=true if the pre-injected message confuses the model.
+            # Uses the URL from the Given clause if one is specified (e.g. "la URL-ul /produse"),
+            # falling back to the base target URL. Disable with QA_NO_BOOTSTRAP=true.
             if config.provider == "ollama" and not os.getenv("QA_NO_BOOTSTRAP"):
-                console.print(f"  [dim cyan]→ browser_navigate({url!r}) [bootstrap][/dim cyan]")
-                nav_result = await session.call_tool("browser_navigate", {"url": url})
+                boot_url = _extract_given_url(req.get("given", ""), url)
+                console.print(f"  [dim cyan]→ browser_navigate({boot_url!r}) [bootstrap][/dim cyan]")
+                nav_result = await session.call_tool("browser_navigate", {"url": boot_url})
                 nav_text = "\n".join(c.text for c in nav_result.content if hasattr(c, "text"))
                 boot_id = "bootstrap_nav_0"
                 messages.append({
                     "role": "assistant",
                     "tool_calls": [{
                         "id": boot_id, "type": "function",
-                        "function": {"name": "browser_navigate", "arguments": json.dumps({"url": url})},
+                        "function": {"name": "browser_navigate", "arguments": json.dumps({"url": boot_url})},
                     }],
                 })
                 messages.append({"role": "tool", "tool_call_id": boot_id, "content": nav_text})
-                actions_log.append({"tool": "browser_navigate", "input": {"url": url}})
+                actions_log.append({"tool": "browser_navigate", "input": {"url": boot_url}})
 
                 # Variant B: also snapshot so the model has page context and refs at turn 0.
                 # depth=5 caps the accessibility tree to avoid overwhelming the model on
@@ -403,6 +503,7 @@ async def run_requirement(
                 messages.append({"role": "tool", "tool_call_id": boot_snap_id, "content": snap_text})
                 actions_log.append({"tool": "browser_snapshot", "input": {}})
 
+            bootstrap_count = len(actions_log)  # actions added by model start after this index
             verdict: dict | None = None
             start = time.monotonic()
 
@@ -468,10 +569,17 @@ async def run_requirement(
                                 ghost_args = json.loads(ghost_args) if ghost_args else {}
                             if ghost_name == "report_result":
                                 console.print("[dim yellow]Fallback-B: report_result ghost call[/dim yellow]")
-                                verdict = ghost_args
-                                break
+                                _mt = [a["tool"] for a in actions_log[bootstrap_count:]]
+                                _v, guard_count, _c = _when_guardrail(ghost_args, req, _mt, guard_count)
+                                if _v is not None:
+                                    verdict = _v
+                                    break
+                                if _c:
+                                    console.print(f"[dim yellow]When-action guardrail ({guard_count}/{_MAX_WHEN_RETRIES}) — '{req.get('when', '')}'[/dim yellow]")
+                                    messages.append({"role": "user", "content": _c})
+                                continue
                             ghost_id = parsed.get("id", f"ghost_{turn}")
-                            args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                            args_preview = _esc_markup(json.dumps(ghost_args, ensure_ascii=False)[:100])
                             console.print(f"  [dim yellow]Ghost-B → {ghost_name}({args_preview})[/dim yellow]")
                             actions_log.append({"tool": ghost_name, "input": ghost_args})
                             mcp_result = await session.call_tool(ghost_name, ghost_args)
@@ -500,10 +608,17 @@ async def run_requirement(
                                 ghost_args = json.loads(ghost_args) if ghost_args else {}
                             if ghost_name == "report_result":
                                 console.print("[dim yellow]Fallback-C: report_result ghost call[/dim yellow]")
-                                verdict = ghost_args
-                                break
+                                _mt = [a["tool"] for a in actions_log[bootstrap_count:]]
+                                _v, guard_count, _c = _when_guardrail(ghost_args, req, _mt, guard_count)
+                                if _v is not None:
+                                    verdict = _v
+                                    break
+                                if _c:
+                                    console.print(f"[dim yellow]When-action guardrail ({guard_count}/{_MAX_WHEN_RETRIES}) — '{req.get('when', '')}'[/dim yellow]")
+                                    messages.append({"role": "user", "content": _c})
+                                continue
                             ghost_id = f"ghost_c_{turn}"
-                            args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                            args_preview = _esc_markup(json.dumps(ghost_args, ensure_ascii=False)[:100])
                             console.print(f"  [dim yellow]Ghost-C → {ghost_name}({args_preview})[/dim yellow]")
                             actions_log.append({"tool": ghost_name, "input": ghost_args})
                             mcp_result = await session.call_tool(ghost_name, ghost_args)
@@ -533,10 +648,17 @@ async def run_requirement(
                                 ghost_args = json.loads(ghost_args) if ghost_args else {}
                             if ghost_name == "report_result":
                                 console.print("[dim yellow]Fallback-D: report_result ghost call[/dim yellow]")
-                                verdict = ghost_args
-                                break
+                                _mt = [a["tool"] for a in actions_log[bootstrap_count:]]
+                                _v, guard_count, _c = _when_guardrail(ghost_args, req, _mt, guard_count)
+                                if _v is not None:
+                                    verdict = _v
+                                    break
+                                if _c:
+                                    console.print(f"[dim yellow]When-action guardrail ({guard_count}/{_MAX_WHEN_RETRIES}) — '{req.get('when', '')}'[/dim yellow]")
+                                    messages.append({"role": "user", "content": _c})
+                                continue
                             ghost_id = f"ghost_d_{turn}"
-                            args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                            args_preview = _esc_markup(json.dumps(ghost_args, ensure_ascii=False)[:100])
                             console.print(f"  [dim yellow]Ghost-D → {ghost_name}({args_preview})[/dim yellow]")
                             actions_log.append({"tool": ghost_name, "input": ghost_args})
                             mcp_result = await session.call_tool(ghost_name, ghost_args)
@@ -558,10 +680,17 @@ async def run_requirement(
                             if isinstance(ghost_name, str) and isinstance(ghost_args, dict):
                                 if ghost_name == "report_result":
                                     console.print("[dim yellow]Fallback-E: report_result ghost call[/dim yellow]")
-                                    verdict = ghost_args
-                                    break
+                                    _mt = [a["tool"] for a in actions_log[bootstrap_count:]]
+                                    _v, guard_count, _c = _when_guardrail(ghost_args, req, _mt, guard_count)
+                                    if _v is not None:
+                                        verdict = _v
+                                        break
+                                    if _c:
+                                        console.print(f"[dim yellow]When-action guardrail ({guard_count}/{_MAX_WHEN_RETRIES}) — '{req.get('when', '')}'[/dim yellow]")
+                                        messages.append({"role": "user", "content": _c})
+                                    continue
                                 ghost_id = f"ghost_e_{turn}"
-                                args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                                args_preview = _esc_markup(json.dumps(ghost_args, ensure_ascii=False)[:100])
                                 console.print(f"  [dim yellow]Ghost-E → {ghost_name}({args_preview})[/dim yellow]")
                                 actions_log.append({"tool": ghost_name, "input": ghost_args})
                                 mcp_result = await session.call_tool(ghost_name, ghost_args)
@@ -594,10 +723,17 @@ async def run_requirement(
                                     ghost_args = json.loads(ghost_args) if ghost_args else {}
                                 if ghost_name == "report_result":
                                     console.print("[dim yellow]Fallback-F: report_result ghost call[/dim yellow]")
-                                    verdict = ghost_args
-                                    break
+                                    _mt = [a["tool"] for a in actions_log[bootstrap_count:]]
+                                    _v, guard_count, _c = _when_guardrail(ghost_args, req, _mt, guard_count)
+                                    if _v is not None:
+                                        verdict = _v
+                                        break
+                                    if _c:
+                                        console.print(f"[dim yellow]When-action guardrail ({guard_count}/{_MAX_WHEN_RETRIES}) — '{req.get('when', '')}'[/dim yellow]")
+                                        messages.append({"role": "user", "content": _c})
+                                    continue
                                 ghost_id = f"ghost_f_{turn}"
-                                args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                                args_preview = _esc_markup(json.dumps(ghost_args, ensure_ascii=False)[:100])
                                 console.print(f"  [dim yellow]Ghost-F → {ghost_name}({args_preview})[/dim yellow]")
                                 actions_log.append({"tool": ghost_name, "input": ghost_args})
                                 mcp_result = await session.call_tool(ghost_name, ghost_args)
@@ -628,10 +764,17 @@ async def run_requirement(
                             if isinstance(ghost_args, dict):
                                 if ghost_name == "report_result":
                                     console.print("[dim yellow]Fallback-G: report_result ghost call[/dim yellow]")
-                                    verdict = ghost_args
-                                    break
+                                    _mt = [a["tool"] for a in actions_log[bootstrap_count:]]
+                                    _v, guard_count, _c = _when_guardrail(ghost_args, req, _mt, guard_count)
+                                    if _v is not None:
+                                        verdict = _v
+                                        break
+                                    if _c:
+                                        console.print(f"[dim yellow]When-action guardrail ({guard_count}/{_MAX_WHEN_RETRIES}) — '{req.get('when', '')}'[/dim yellow]")
+                                        messages.append({"role": "user", "content": _c})
+                                    continue
                                 ghost_id = f"ghost_g_{turn}"
-                                args_preview = json.dumps(ghost_args, ensure_ascii=False)[:100]
+                                args_preview = _esc_markup(json.dumps(ghost_args, ensure_ascii=False)[:100])
                                 console.print(f"  [dim yellow]Ghost-G → {ghost_name}({args_preview})[/dim yellow]")
                                 actions_log.append({"tool": ghost_name, "input": ghost_args})
                                 mcp_result = await session.call_tool(ghost_name, ghost_args)
@@ -672,10 +815,18 @@ async def run_requirement(
                         args = {}
 
                     if name == "report_result":
-                        verdict = args
+                        _mt = [a["tool"] for a in actions_log[bootstrap_count:]]
+                        _v, guard_count, _c = _when_guardrail(args, req, _mt, guard_count)
+                        if _v is not None:
+                            verdict = _v
+                            break
+                        if _c:
+                            console.print(f"[dim yellow]When-action guardrail ({guard_count}/{_MAX_WHEN_RETRIES}) — '{req.get('when', '')}'[/dim yellow]")
+                            tool_results.append({"role": "tool", "tool_call_id": tc.id, "content": "report_result blocked by When-action guardrail."})
+                            pending_correction = _c
                         break
 
-                    args_preview = json.dumps(args, ensure_ascii=False)[:100]
+                    args_preview = _esc_markup(json.dumps(args, ensure_ascii=False)[:100])
                     console.print(f"  [dim cyan]→ {name}({args_preview})[/dim cyan]")
                     actions_log.append({"tool": name, "input": args})
 
@@ -694,6 +845,9 @@ async def run_requirement(
 
                 if tool_results:
                     messages.extend(tool_results)
+                if pending_correction:
+                    messages.append({"role": "user", "content": pending_correction})
+                    pending_correction = None
 
             if not verdict:
                 verdict = {

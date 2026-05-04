@@ -1,0 +1,17 @@
+meta:
+  name: "Alcon Ind"
+  version: "1.0"
+  target:
+    type: web
+    environments:
+      prod:
+        url: https://www.alconind.ro
+    default_environment: prod
+
+context: |
+  Alcon Ind este un distribuitor român de produse metalurgice (țevi, profile, tablă)
+  cu sediul în Târgu Mureș, activ din 2007. Site-ul are un meniu de navigare cu
+  secțiunile: Acasă, Despre Noi, Produse, Blog, Contact și Cerere Ofertă.
+  Homepage-ul conține butoane CTA ("Cere o Ofertă Acum", "Vezi Produsele"),
+  statistici (15+ ani, 500+ clienți) și o secțiune de avantaje.
+  Site-ul are un formular de cerere ofertă și date de contact (telefon, WhatsApp).

@@ -6,6 +6,7 @@ format. LiteLLM converts to the target provider's format transparently.
 import os
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -143,9 +144,10 @@ _DEFAULTS = {
 _LLM_TIMEOUT_DEFAULTS: dict = {
     "anthropic": 30,
     "ollama": {
-        "qwen2.5:14b": 90,   # ~23s/turn on M4 Pro GPU; 90s covers complex page snapshots
-        "qwen2.5:32b": 150,  # larger model, longer inference on M4 Pro
-        "__default__": 120,  # qwen2.5:7b, llama3.1:8b, CPU inference
+        "qwen2.5:14b":      90,   # ~23s/turn on M4 Pro GPU
+        "qwen2.5:32b":      150,  # larger model, longer inference on M4 Pro
+        "mistral-small:22b": 300, # 12GB + large KV cache saturates M4 Pro bandwidth; first post-snapshot call is slow
+        "__default__":      120,  # qwen2.5:7b, llama3.1:8b, CPU inference
     },
 }
 
@@ -157,6 +159,12 @@ _TEST_TIMEOUT_DEFAULTS: dict = {
         "__default__": 360,  # qwen2.5:7b on CPU: ~60s/turn × 6 turns
     },
 }
+
+
+# Rate-limit retry defaults (provider-agnostic: Anthropic, Together.ai, etc.)
+# Override: QA_RATE_LIMIT_RETRIES, QA_RATE_LIMIT_WAIT
+_RATE_LIMIT_MAX_RETRIES = 2   # attempts after the first failure
+_RATE_LIMIT_WAIT_BASE   = 60  # seconds before retry 1; doubles for retry 2
 
 
 def _resolve_timeout(defaults: dict, provider: str, model: str) -> int | None:
@@ -213,8 +221,36 @@ class LLMConfig:
 
     def extra_kwargs(self) -> dict:
         if self.provider == "ollama":
-            return {"api_base": self.base_url}
+            # Ollama defaults to 4096 num_ctx which is far too small for browser snapshots
+            # + system prompt + tool definitions. Pass explicitly; override via QA_NUM_CTX.
+            # temperature/seed/top_k make runs deterministic; override via QA_TEMPERATURE / QA_SEED.
+            num_ctx = int(os.getenv("QA_NUM_CTX", 8192))
+            seed = int(os.getenv("QA_SEED", 42))
+            return {
+                "api_base": self.base_url,
+                "extra_body": {"options": {
+                    "num_ctx": num_ctx,
+                    "temperature": 0,
+                    "top_p": 1,
+                    "top_k": 1,
+                    "seed": seed,
+                }},
+            }
         return {}
+
+
+def _verbose_log(config: "LLMConfig", response) -> None:
+    """Log each LLM turn to stderr when QA_VERBOSE_LLM=true."""
+    import sys
+    label = f"[{config.resolved_model()}:{config.role}]"
+    msg = response.choices[0].message
+    if msg.tool_calls:
+        for tc in msg.tool_calls:
+            args = tc.function.arguments.replace("\n", " ")[:200]
+            print(f"{label} CALL  {tc.function.name}({args})", file=sys.stderr, flush=True)
+    if msg.content:
+        content = str(msg.content).replace("\n", " ")[:400]
+        print(f"{label} TEXT  {content}", file=sys.stderr, flush=True)
 
 
 def complete(
@@ -239,6 +275,7 @@ def complete(
         messages=messages,
         max_tokens=max_tokens,
         timeout=config.llm_timeout,
+        temperature=float(os.getenv("QA_TEMPERATURE", "0")),
         **config.extra_kwargs(),
     )
     if tools:
@@ -253,4 +290,22 @@ def complete(
     if response_format:
         kwargs["response_format"] = response_format
 
-    return litellm.completion(**kwargs)
+    max_retries = int(os.getenv("QA_RATE_LIMIT_RETRIES", _RATE_LIMIT_MAX_RETRIES))
+    wait_base   = int(os.getenv("QA_RATE_LIMIT_WAIT",    _RATE_LIMIT_WAIT_BASE))
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = litellm.completion(**kwargs)
+            if os.getenv("QA_VERBOSE_LLM", "").lower() in ("1", "true"):
+                _verbose_log(config, response)
+            return response
+        except litellm.RateLimitError:
+            if attempt >= max_retries:
+                raise
+            wait = wait_base * (attempt + 1)
+            print(
+                f"[qa-agent] RateLimitError — waiting {wait}s before retry "
+                f"{attempt + 1}/{max_retries} ({config.provider}/{config.resolved_model()})...",
+                file=sys.stderr, flush=True,
+            )
+            time.sleep(wait)

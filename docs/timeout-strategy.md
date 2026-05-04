@@ -94,4 +94,35 @@ QA_PROVIDER=ollama QA_LLM_TIMEOUT=120 QA_TEST_TIMEOUT=360 uv run python -m qa_ag
 
 Result: test runs ~470s (slightly over the 360s soft limit due to synchronous LLM call).
 
+### Rate-Limit Retry (`complete()` in `router.py`)
+
+**What it does:** When a provider returns a rate-limit error (`litellm.RateLimitError`), `complete()` waits and retries rather than propagating the error as a test `ERROR` verdict.
+
+**Why needed:** Anthropic's free/Tier-1 API enforces a 30,000 input-token-per-minute limit. A single alconind.ro page snapshot plus tool definitions approaches this limit, so back-to-back scenarios exhaust the quota within seconds. Without retry, consecutive tests fail with `ERROR` even though the LLM is fully operational.
+
+**Behavior:**
+- Retry up to `QA_RATE_LIMIT_RETRIES` times (default: **2** extra attempts = 3 total)
+- Wait `QA_RATE_LIMIT_WAIT × (attempt + 1)` seconds before each retry (default: **60s**, then **120s**)
+- Logs each wait to stderr: `[qa-agent] RateLimitError — waiting 60s before retry 1/2 (anthropic/claude-sonnet-4-6)...`
+- After exhausting retries, re-raises the error (becomes `status: error` in the report)
+
+**Configuration:**
+
+```bash
+QA_RATE_LIMIT_RETRIES=2   # default — 2 retries after first failure
+QA_RATE_LIMIT_WAIT=60     # default — 60s before retry 1, 120s before retry 2
+QA_RATE_LIMIT_RETRIES=0   # disable retry (fail immediately on rate limit)
+QA_RATE_LIMIT_WAIT=30     # shorter wait (if you know your quota resets faster)
+```
+
+**Provider applicability:** Fires on any provider that returns `RateLimitError` — Anthropic, Together.ai, OpenAI. No effect on Ollama (local inference, no rate limits).
+
+**Interaction with test timeout:** The wait counts toward `QA_TEST_TIMEOUT`. A 60s retry wait on a scenario with a 180s test timeout will exhaust most of the budget. If running suites against rate-limited APIs, set `QA_TEST_TIMEOUT` generously or disable it (`QA_TEST_TIMEOUT=0`).
+
+**Example output:**
+```
+[qa-agent] RateLimitError — waiting 60s before retry 1/2 (anthropic/claude-sonnet-4-6)...
+  → browser_snapshot({})
+```
+
 ---

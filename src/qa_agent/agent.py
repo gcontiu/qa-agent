@@ -505,7 +505,7 @@ async def run_requirement(
 
             bootstrap_count = len(actions_log)  # actions added by model start after this index
             action_counts: dict[str, int] = {}   # tracks (tool, primary_arg) repetitions
-            loop_threshold = int(os.getenv("QA_LOOP_THRESHOLD", "2"))
+            loop_threshold = int(os.getenv("QA_LOOP_THRESHOLD", "1"))
             verdict: dict | None = None
             start = time.monotonic()
 
@@ -828,6 +828,38 @@ async def run_requirement(
                             pending_correction = _c
                         break
 
+                    # Loop guard: block repeated non-snapshot actions BEFORE executing them.
+                    # Takes a fresh snapshot instead so the model has current page context.
+                    # Threshold=1 means each unique (tool, target) can execute at most once.
+                    if name != "browser_snapshot":
+                        _primary = args.get("target") or args.get("url") or ""
+                        _loop_key = f"{name}:{_primary}"
+                        if action_counts.get(_loop_key, 0) >= loop_threshold:
+                            console.print(
+                                f"[dim yellow]Loop guard — blocking {name}"
+                                f"({_esc_markup(_primary[:60])}) "
+                                f"already called {action_counts[_loop_key]}×[/dim yellow]"
+                            )
+                            snap_result = await session.call_tool("browser_snapshot", {})
+                            snap_text = "\n".join(
+                                c.text for c in snap_result.content if hasattr(c, "text")
+                            )
+                            tool_results.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    f"[LOOP GUARD] {name}({_primary!r}) blocked — "
+                                    f"already executed {action_counts[_loop_key]} time(s). "
+                                    "The action has already been performed.\n\n"
+                                    f"Current page state:\n{snap_text}\n\n"
+                                    "Do NOT call any navigation element again. "
+                                    "Verify the Then conditions from the page state above "
+                                    "and call report_result."
+                                ),
+                            })
+                            continue
+                        action_counts[_loop_key] = action_counts.get(_loop_key, 0) + 1
+
                     args_preview = _esc_markup(json.dumps(args, ensure_ascii=False)[:100])
                     console.print(f"  [dim cyan]→ {name}({args_preview})[/dim cyan]")
                     actions_log.append({"tool": name, "input": args})
@@ -836,28 +868,6 @@ async def run_requirement(
                     content_text = "\n".join(
                         c.text for c in mcp_result.content if hasattr(c, "text")
                     )
-
-                    # Loop guard: detect the same non-snapshot action repeated N times.
-                    # Appends a corrective instruction to the tool result so the model
-                    # knows to stop repeating and verify page state instead.
-                    if name != "browser_snapshot":
-                        _primary = args.get("target") or args.get("url") or ""
-                        _loop_key = f"{name}:{_primary}"
-                        action_counts[_loop_key] = action_counts.get(_loop_key, 0) + 1
-                        if action_counts[_loop_key] >= loop_threshold:
-                            console.print(
-                                f"[dim yellow]Loop guard ({action_counts[_loop_key]}×) "
-                                f"— {name}({_esc_markup(_primary[:60])})[/dim yellow]"
-                            )
-                            content_text += (
-                                f"\n\n[LOOP GUARD] You have called {name}({_primary!r}) "
-                                f"{action_counts[_loop_key]} times. "
-                                "If this was a navigation or click action, it has already "
-                                "succeeded — the page has changed. Do NOT call it again. "
-                                "Call browser_snapshot (no arguments) to see the current "
-                                "page state, then verify the Then conditions and call report_result."
-                            )
-
                     tool_results.append({
                         "role": "tool",
                         "tool_call_id": tc.id,

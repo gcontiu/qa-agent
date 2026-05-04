@@ -75,7 +75,7 @@ Per-model LLM timeout defaults (Ollama):
 | `QA_TOOL_CHOICE` | _(unset)_ | Set to `required` to force tool calls on every turn (fixes llama3.1:8b planning loop; breaks qwen2.5:7b) |
 | `QA_NO_BOOTSTRAP` | _(unset)_ | Set to `true` to disable bootstrap navigation pre-injection for Ollama |
 | `QA_BOOTSTRAP_DEPTH` | `5` | Accessibility tree depth for the bootstrap snapshot. Reduce to `3` on dense pages to shrink input context |
-| `QA_LOOP_THRESHOLD` | `2` | Number of times the same tool+target can repeat before a loop guard message is injected. Prevents infinite click/navigate loops on models without chain-of-thought |
+| `QA_LOOP_THRESHOLD` | `1` | Max executions of the same (tool, target) before the loop guard blocks it. At threshold=1, each navigation target can be clicked at most once — the second attempt is blocked, a fresh snapshot is taken, and the model is told to verify Then conditions instead |
 
 ### Ollama context window
 

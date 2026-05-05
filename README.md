@@ -100,32 +100,53 @@ Per-model LLM timeout defaults (Ollama):
 
 ## Example runs
 
+### Anthropic
+
 ```bash
-# Anthropic (default) — full alconind suite
+# Default — full suite, Sonnet (Pro/Starter tier)
 uv run qa-agent run specs/alconind --output reports/alconind-full
 
-# Together.ai — Starter tier candidate (Llama 3.3 70B)
+# Haiku — Free tier config (~$0.056/run)
+QA_EXECUTOR_MODEL=claude-haiku-4-5-20251001 \
+uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-haiku
+
+# Re-run only failures from last run
+uv run qa-agent run specs/alconind --only-failing
+```
+
+### Together.ai
+
+```bash
+# Llama 3.3 70B — 3/3 PASS, proper CALL, fast (~9s/scenario)
 QA_EXECUTOR_PROVIDER=together_ai \
+QA_EXECUTOR_MODEL=meta-llama/Llama-3.3-70B-Instruct-Turbo \
+TOGETHER_API_KEY=<key> \
 QA_VERBOSE_LLM=true \
 uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-together-70b
 
-# Together.ai — Free tier candidate (Qwen 2.5 7B Turbo)
+# Qwen 2.5 7B Turbo — cheapest (~$0.04/run), fragile on navigation scenarios
 QA_EXECUTOR_PROVIDER=together_ai \
 QA_EXECUTOR_MODEL=Qwen/Qwen2.5-7B-Instruct-Turbo \
+TOGETHER_API_KEY=<key> \
 QA_VERBOSE_LLM=true \
 uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-together-7b
+```
 
-# Ollama — smoke test with mistral-small:22b
+**Note:** Together.ai only supports `tools` (function calling) for specific models.
+Confirmed working: `Llama-3.3-70B-Instruct-Turbo`, `Qwen2.5-7B-Instruct-Turbo`.
+Other models (Qwen 14B, Hermes-3 8B, Llama 3.1 8B) fail with `UnsupportedParamsError`.
+
+### Ollama (local)
+
+```bash
+# mistral-small:22b — recommended local model, 3/3 PASS at depth=6
 QA_EXECUTOR_PROVIDER=ollama \
 QA_EXECUTOR_MODEL=mistral-small:22b \
 QA_BOOTSTRAP_DEPTH=6 \
 QA_VERBOSE_LLM=true \
-uv run qa-agent run specs/alconind-smoke
+uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-mistral
 
-# Re-run only failures from last run
-uv run qa-agent run specs/alconind --only-failing
-
-# Ollama debug — verbose LLM output, slim tools, reduced snapshot depth
+# Debug run — slim tools, verbose, reduced depth
 QA_EXECUTOR_PROVIDER=ollama \
 QA_EXECUTOR_MODEL=mistral-small:22b \
 QA_FORCE_SLIM=true \

@@ -4,10 +4,10 @@ Strategic decisions with rationale, alternatives considered, and expected outcom
 
 ---
 
-## BD-001 — Together.ai as second LLM provider
+## BD-001 — LLM provider strategy for SaaS tiers
 
 **Date:** 2026-05-04
-**Status:** Planned — implementation starting
+**Status:** Closed — validated and implemented
 
 ### Context
 
@@ -48,64 +48,42 @@ Empirical data shows 100% pass rate on complex marketing sites. Anthropic Sonnet
 | Starter ($19/mo, 50 runs) | **Anthropic** | claude-sonnet-4-6 | ~$0.21 | $19 | ~$8.50 |
 | Pro ($49/mo, 200 runs) | Anthropic | claude-sonnet-4-6 | ~$0.21 | $49 | ~$7 |
 
-**Key correction from original roadmap:** Llama 3.3 70B on Together.ai (~$0.37/run) is more expensive than Anthropic Sonnet (~$0.21/run) and less reliable (no self-recovery from navigation loops). There is no economic or quality argument for using it on paid tiers. Together.ai remains relevant only for the Free tier (Qwen 7B Turbo at ~$0.04/run) and as a BYOK option.
+### Validation findings (2026-05-04)
 
-### Implementation plan
+**Together.ai implementation:** done — `together_ai` provider added to `router.py`.
 
-**Phase A — Code (~1-2h):**
+**Critical discovery:** Together.ai's `tools` parameter (OpenAI function calling) is only supported on a subset of hosted models. Confirmed working: `Llama-3.3-70B-Instruct-Turbo`, `Qwen2.5-7B-Instruct-Turbo`. Rejected with `UnsupportedParamsError`: `Qwen2.5-14B-Instruct-Turbo`, `Llama-3.1-8B-Instruct-Turbo`, `Hermes-3-Llama-3.1-8B`. This eliminates the mid-size cheap model tier.
 
-1. `src/qa_agent/llm/router.py`:
-   - Add `together_ai` defaults per role in `_DEFAULTS`
-   - Add `litellm_model()` branch: `return f"together_ai/{m}"`
-   - Add timeout defaults: Llama 70B ~60s, Qwen 7B ~15s
-   - No `extra_kwargs()` changes — `TOGETHER_API_KEY` is auto-read by LiteLLM
+**Model quality matrix (empirical, alconind.ro smoke suite):**
 
-2. `README.md` — add Together.ai to providers table and example runs
+| Model | Provider | Cost/run | 3/3 PASS | Tool call format | Self-recovery |
+|-------|----------|----------|----------|------------------|---------------|
+| claude-sonnet-4-6 | Anthropic | ~$0.21 | ✓ | 100% CALL | ✓ |
+| claude-haiku-4-5-20251001 | Anthropic | ~$0.056 | ✓ | 100% CALL | ✓ |
+| Llama-3.3-70B-Instruct-Turbo | Together.ai | ~$0.05 | ✓ | 100% CALL | ✗ (no COT) |
+| Qwen2.5-7B-Instruct-Turbo | Together.ai | ~$0.04 | 2/3 | Mixed (CALL + confused TEXT) | ✗ |
 
-3. `docs/cloud-llms.md` (new) — model selection guide, cost estimates, quality matrix
+**Final decision — Anthropic-only architecture:**
 
-**Phase B — Validation (~30 min):**
+| Tier | Model | Cost/run | Cost 5 runs/mo | Revenue | Gross margin |
+|------|-------|----------|----------------|---------|--------------|
+| Free (5 runs/mo) | claude-haiku-4-5-20251001 | ~$0.056 | ~$0.28/user | $0 | -$0.28 (acquisition) |
+| Starter ($19/mo, 50 runs) | claude-sonnet-4-6 | ~$0.21 | ~$10.50 | $19 | ~$8.50 |
+| Pro ($49/mo, 200 runs) | claude-sonnet-4-6 | ~$0.21 | ~$42 | $49 | ~$7 |
 
-```bash
-# Starter tier candidate
-QA_EXECUTOR_PROVIDER=together_ai \
-QA_EXECUTOR_MODEL=meta-llama/Llama-3.3-70B-Instruct-Turbo \
-uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-together-70b
+**Why Haiku over Together.ai Qwen 7B for Free tier:**
+- Cost difference: $0.056 vs $0.04 = $0.08/month/user (negligible at early stage)
+- Quality: 3/3 PASS vs 2/3, no hallucinations, no extractor fallback needed
+- Reliability: same API infrastructure as paid tiers, no provider switching logic
+- Free users who see broken test results churn immediately; quality matters even on free
 
-# Free tier candidate
-QA_EXECUTOR_PROVIDER=together_ai \
-QA_EXECUTOR_MODEL=Qwen/Qwen2.5-7B-Instruct-Turbo \
-uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-together-7b
-```
+**Together.ai role going forward:**
+- Implemented and available as opt-in via `QA_EXECUTOR_PROVIDER=together_ai`
+- Primary use case: BYOK (Bring Your Own Key) for enterprise users who want cost control
+- Secondary: hedging against Anthropic pricing changes (LiteLLM abstraction enables switch within hours)
+- Not used in default tier configuration
 
-**Key questions validation answers:**
-1. Does Llama 3.3 70B emit proper `CALL` tool calls?
-2. Pass rate vs Anthropic baseline (3/3 smoke = green light for Starter tier)
-3. Actual cost per run (validate estimates)
-4. Speed: turns/second on Together.ai infrastructure
-
-**Phase C — Decision gates:**
-
-| Outcome | Decision |
-|---------|----------|
-| Llama 70B: 3/3 PASS + proper CALLs | Confirm Starter tier. Begin Phase 1.5 (auth foundation). |
-| Llama 70B: 2/3 PASS or ghost fallbacks | Evaluate Anthropic Haiku for Starter. Revisit tier pricing. |
-| Qwen 7B: 3/3 PASS + proper CALLs | Confirm Free tier as-is. |
-| Qwen 7B: fails on complex scenarios | Free tier = public-pages-only restriction (already in roadmap D4). |
-
-### Risks
-
-| Risk | Likelihood | Mitigation |
-|------|-----------|------------|
-| Llama 3.3 70B quality below Anthropic | Medium | Ghost fallback chain handles it; extractor as last resort |
-| Together.ai pricing changes | Low | LiteLLM abstraction allows switch to Fireworks/Groq within hours |
-
-### Alternatives considered
-
-- **Anthropic Haiku for Starter** — $0.08/run, higher quality but 2× cost. Keep as fallback.
-- **Groq** — very fast but limited model selection and stricter rate limits.
-- **Fireworks.ai** — comparable pricing, less established ecosystem.
-- **Self-hosted vLLM on Modal** — viable at >3,000 runs/month; premature now.
+**Architecture simplification:** single provider (Anthropic) for all SaaS tiers reduces operational complexity, eliminates provider-specific failure modes in production, and centralises reliability guarantees. See `docs/architecture.md` §LLM Provider Architecture.
 
 ---
 

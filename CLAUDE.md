@@ -53,3 +53,20 @@ These reflect the current design direction from the evaluation of `propunere1.md
 - `docs/backward-compatibility-rule.md` — mandatory checklist before every change
 - `docs/local-llms.md` — Ollama auto-start, slim/full tools, ghost fallbacks, bootstrap navigation, per-model compatibility matrix
 - `docs/timeout-strategy.md` — per-call LLM timeout and per-test soft timeout configuration
+
+## Proposed Directory layout
+
+```
+qa-agent/
+├── src/qa_agent/
+│   ├── cli.py              # Typer entrypoint
+│   ├── mcp_server.py       # exposes qa-agent as MCP to other agents
+│   ├── agent.py            # Agent SDK orchestration
+│   ├── specs/              # loader + Pydantic schema (YAML + Gherkin)
+│   ├── fixtures/           # declarative + imperative fixture runtime
+│   ├── tools/              # custom MCP server (api, db seed, artifacts)
+│   └── prompts/            # subagent markdown files
+├── specs/                  # user-provided spec directories (per product)
+├── reports/                # gitignored; run artifacts + state store
+└── tests/                  # the agent's own tests
+

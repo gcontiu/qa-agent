@@ -40,7 +40,3 @@ Feature: Alcon Ind — Homepage și navigare
     Given utilizatorul accesează site-ul
     Then o referință la experiența sau numărul de clienți ai companiei este vizibilă
 
-  @id:AC-007 @priority:low
-  Scenario: Footer conține linkuri GDPR și politică de confidențialitate
-    Given utilizatorul accesează site-ul
-    Then footer-ul conține un link către politica de confidențialitate sau GDPR

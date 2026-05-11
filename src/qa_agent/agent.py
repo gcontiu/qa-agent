@@ -22,6 +22,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from qa_agent.llm import LLMConfig, complete, ensure_provider_running, _resolve_timeout, _TEST_TIMEOUT_DEFAULTS
+from qa_agent.llm.router import estimate_cost
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -261,11 +262,146 @@ def _prune_for_verdict(messages: list[dict]) -> list[dict]:
     return pruned
 
 
+async def _bootstrap(
+    session: ClientSession,
+    req: dict,
+    base_url: str,
+    snap_depth: int,
+    console: Console,
+) -> tuple[str, list[dict], list[dict]]:
+    """Pre-execute browser_navigate + browser_snapshot before the LLM loop.
+
+    Used by Ollama (where models struggle to initiate tool calls) and Anthropic
+    (where it eliminates redundant first-turn navigation). Returns the snapshot
+    text, conversation messages to extend, and actions_log entries — caller merges
+    them into its state. Centralised to avoid duplication between providers.
+    """
+    boot_url = _extract_given_url(req.get("given", ""), base_url)
+
+    console.print(f"  [dim cyan]→ browser_navigate({boot_url!r}) [bootstrap][/dim cyan]")
+    nav_result = await session.call_tool("browser_navigate", {"url": boot_url})
+    nav_text = "\n".join(c.text for c in nav_result.content if hasattr(c, "text"))
+
+    snap_args = {"depth": snap_depth}
+    console.print(f"  [dim cyan]→ browser_snapshot(depth={snap_depth}) [bootstrap][/dim cyan]")
+    snap_result = await session.call_tool("browser_snapshot", snap_args)
+    snap_text = "\n".join(c.text for c in snap_result.content if hasattr(c, "text"))
+
+    nav_id, snap_id = "bootstrap_nav_0", "bootstrap_snap_0"
+    boot_messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [{
+                "id": nav_id, "type": "function",
+                "function": {"name": "browser_navigate", "arguments": json.dumps({"url": boot_url})},
+            }],
+        },
+        {"role": "tool", "tool_call_id": nav_id, "content": nav_text},
+        {
+            "role": "assistant",
+            "tool_calls": [{
+                "id": snap_id, "type": "function",
+                "function": {"name": "browser_snapshot", "arguments": json.dumps(snap_args)},
+            }],
+        },
+        {"role": "tool", "tool_call_id": snap_id, "content": snap_text},
+    ]
+    boot_actions = [
+        {"tool": "browser_navigate", "input": {"url": boot_url}},
+        {"tool": "browser_snapshot", "input": {}},
+    ]
+    return snap_text, boot_messages, boot_actions
+
+
+async def _single_shot_verify(
+    config: "LLMConfig",
+    req: dict,
+    context: str,
+    snap_text: str,
+    console: Console,
+    _usage: dict | None = None,
+) -> dict | None:
+    """Verify Then conditions via a single LLM call with forced report_result.
+
+    Uses tool_choice="required" with only report_result available — Anthropic and
+    OpenAI-compatible providers (including Together.ai) all honour this. The tool
+    schema's enum ["pass", "fail"] guarantees a structured verdict, more reliable
+    than response_format=json_object across providers.
+
+    Returns a verdict dict on success, None on any failure (caller falls through
+    to the full tool loop).
+    """
+    user_msg = (
+        (f"Product context:\n{context.strip()}\n\n" if context else "")
+        + f"Test Requirement:\n"
+          f"ID: {req['id']}\n"
+          f"Title: {req['title']}\n"
+          f"Given: {req['given']}\n"
+          f"Then:  {req['then']}\n\n"
+          f"Current page state:\n{snap_text}\n\n"
+          "Based ONLY on the page state above, verify whether the Then conditions "
+          "are met and call report_result with your verdict."
+    )
+    messages = [
+        {"role": "system", "content": _system_prompt()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        response = complete(
+            config, messages,
+            tools=[_REPORT_TOOL],
+            tool_choice="required",
+            max_tokens=400,
+            _usage=_usage,
+        )
+        for tc in response.choices[0].message.tool_calls or []:
+            if tc.function.name == "report_result":
+                args = json.loads(tc.function.arguments)
+                if (isinstance(args, dict)
+                        and args.get("status") in ("pass", "fail")
+                        and "actual" in args):
+                    console.print("[dim]Single-shot verification[/dim]")
+                    return args
+    except Exception as e:
+        console.print(f"[dim red]Single-shot failed ({e}) — using tool loop[/dim red]")
+    return None
+
+
+def _prune_stale_snapshots(messages: list[dict]) -> None:
+    """Replace all but the most recent browser_snapshot result with a placeholder.
+
+    After each new snapshot the previous ones are stale — their refs no longer
+    exist on the current page. Keeping them wastes tokens without helping the model.
+    Runs in-place; called after every tool_results extension.
+    """
+    snapshot_ids: list[str] = []
+    for msg in messages:
+        if msg.get("role") == "assistant":
+            for tc in (msg.get("tool_calls") or []):
+                if isinstance(tc, dict) and tc.get("function", {}).get("name") == "browser_snapshot":
+                    call_id = tc.get("id", "")
+                    if call_id:
+                        snapshot_ids.append(call_id)
+
+    if len(snapshot_ids) <= 1:
+        return
+
+    stale_ids = set(snapshot_ids[:-1])
+    for msg in messages:
+        if (
+            msg.get("role") == "tool"
+            and msg.get("tool_call_id") in stale_ids
+            and len(msg.get("content", "")) > 100
+        ):
+            msg["content"] = "[snapshot superseded — see latest snapshot above]"
+
+
 async def _extract_verdict(
     executor_config: LLMConfig,
     messages: list[dict],
     then_clause: str,
     console: Console,
+    _usage: dict | None = None,
 ) -> dict | None:
     """Last-resort verdict extraction using structured JSON output.
 
@@ -308,6 +444,7 @@ async def _extract_verdict(
             pruned,
             max_tokens=300,
             response_format={"type": "json_object"},
+            _usage=_usage,
         )
         content = (response.choices[0].message.content or "").strip()
         parsed = json.loads(content)
@@ -463,53 +600,49 @@ async def run_requirement(
             actions_log: list[dict] = []
             guard_count = 0
             pending_correction: str | None = None
+            verdict: dict | None = None
+            scenario_usage: dict = {}  # accumulates token counts across all complete() calls
 
-            # Bootstrap: pre-navigate for providers that struggle to initiate tool calls.
-            # Injects browser_navigate as a completed turn so the model starts mid-stream.
-            # Uses the URL from the Given clause if one is specified (e.g. "la URL-ul /produse"),
-            # falling back to the base target URL. Disable with QA_NO_BOOTSTRAP=true.
-            if config.provider == "ollama" and not os.getenv("QA_NO_BOOTSTRAP"):
-                boot_url = _extract_given_url(req.get("given", ""), url)
-                console.print(f"  [dim cyan]→ browser_navigate({boot_url!r}) [bootstrap][/dim cyan]")
-                nav_result = await session.call_tool("browser_navigate", {"url": boot_url})
-                nav_text = "\n".join(c.text for c in nav_result.content if hasattr(c, "text"))
-                boot_id = "bootstrap_nav_0"
-                messages.append({
-                    "role": "assistant",
-                    "tool_calls": [{
-                        "id": boot_id, "type": "function",
-                        "function": {"name": "browser_navigate", "arguments": json.dumps({"url": boot_url})},
-                    }],
-                })
-                messages.append({"role": "tool", "tool_call_id": boot_id, "content": nav_text})
-                actions_log.append({"tool": "browser_navigate", "input": {"url": boot_url}})
-
-                # Variant B: also snapshot so the model has page context and refs at turn 0.
-                # depth=5 caps the accessibility tree to avoid overwhelming the model on
-                # complex pages (large sites produce 10k+ token snapshots without a limit).
+            # Bootstrap: pre-navigate + snapshot before the LLM loop.
+            # Ollama: needed to initiate tool calls reliably for small models.
+            # Anthropic: avoids first-turn navigation overhead and feeds single-shot.
+            # Disable with QA_NO_BOOTSTRAP=true. Uses the URL from the Given clause
+            # if one is specified (e.g. "la URL-ul /produse").
+            should_bootstrap = (
+                config.provider in ("ollama", "anthropic")
+                and not os.getenv("QA_NO_BOOTSTRAP")
+            )
+            snap_text: str | None = None
+            if should_bootstrap:
                 snap_depth = int(os.getenv("QA_BOOTSTRAP_DEPTH", "5"))
-                snap_args = {"depth": snap_depth}
-                console.print(f"  [dim cyan]→ browser_snapshot(depth={snap_depth}) [bootstrap][/dim cyan]")
-                snap_result = await session.call_tool("browser_snapshot", snap_args)
-                snap_text = "\n".join(c.text for c in snap_result.content if hasattr(c, "text"))
-                boot_snap_id = "bootstrap_snap_0"
-                messages.append({
-                    "role": "assistant",
-                    "tool_calls": [{
-                        "id": boot_snap_id, "type": "function",
-                        "function": {"name": "browser_snapshot", "arguments": json.dumps(snap_args)},
-                    }],
-                })
-                messages.append({"role": "tool", "tool_call_id": boot_snap_id, "content": snap_text})
-                actions_log.append({"tool": "browser_snapshot", "input": {}})
+                snap_text, boot_messages, boot_actions = await _bootstrap(
+                    session, req, url, snap_depth, console
+                )
+                messages.extend(boot_messages)
+                actions_log.extend(boot_actions)
+
+            # Single-shot verdict: skip the tool loop entirely for Then-only scenarios
+            # on Anthropic. Saves tool definitions (~6K) + multi-turn snapshot accumulation.
+            # Falls through to tool loop on any failure (verdict stays None).
+            then_only = not req.get("when", "").strip()
+            if (config.provider == "anthropic" and then_only
+                    and snap_text and verdict is None):
+                verdict = await _single_shot_verify(
+                    config, req, context, snap_text, console, _usage=scenario_usage
+                )
 
             bootstrap_count = len(actions_log)  # actions added by model start after this index
             action_counts: dict[str, int] = {}   # tracks (tool, primary_arg) repetitions
             loop_threshold = int(os.getenv("QA_LOOP_THRESHOLD", "1"))
-            verdict: dict | None = None
+            # Max turns: lower default for Anthropic (12) vs Ollama (25, where test_timeout is primary cap)
+            _default_max_turns = MAX_TURNS if config.provider == "ollama" else 12
+            max_turns = int(os.getenv("QA_MAX_TURNS", _default_max_turns))
             start = time.monotonic()
 
-            for turn in range(MAX_TURNS):
+            for turn in range(max_turns):
+                if verdict is not None:
+                    break
+
                 if test_timeout and (time.monotonic() - start) >= test_timeout:
                     console.print(f"[red]Test timeout ({test_timeout}s) exceeded[/red]")
                     verdict = {
@@ -520,7 +653,7 @@ async def run_requirement(
                     break
 
                 try:
-                    response = complete(config, messages, tools=all_tools)
+                    response = complete(config, messages, tools=all_tools, _usage=scenario_usage)
                 except Exception as e:
                     verdict = {
                         "status": "error",
@@ -798,7 +931,7 @@ async def run_requirement(
                         "[yellow]Warning: agent stopped without calling report_result[/yellow]"
                     )
                     verdict = await _extract_verdict(
-                        config, messages, req.get("then", ""), console
+                        config, messages, req.get("then", ""), console, _usage=scenario_usage
                     )
                     if not verdict:
                         verdict = {
@@ -840,7 +973,8 @@ async def run_requirement(
                                 f"({_esc_markup(_primary[:60])}) "
                                 f"already called {action_counts[_loop_key]}×[/dim yellow]"
                             )
-                            snap_result = await session.call_tool("browser_snapshot", {})
+                            _snap_depth = int(os.getenv("QA_SNAPSHOT_DEPTH", "5"))
+                            snap_result = await session.call_tool("browser_snapshot", {"depth": _snap_depth})
                             snap_text = "\n".join(
                                 c.text for c in snap_result.content if hasattr(c, "text")
                             )
@@ -859,6 +993,11 @@ async def run_requirement(
                             })
                             continue
                         action_counts[_loop_key] = action_counts.get(_loop_key, 0) + 1
+
+                    # Bound snapshot depth to limit accessibility tree size.
+                    # Default 5; model can request deeper by passing depth explicitly.
+                    if name == "browser_snapshot" and "depth" not in args:
+                        args = {**args, "depth": int(os.getenv("QA_SNAPSHOT_DEPTH", "5"))}
 
                     args_preview = _esc_markup(json.dumps(args, ensure_ascii=False)[:100])
                     console.print(f"  [dim cyan]→ {name}({args_preview})[/dim cyan]")
@@ -879,16 +1018,24 @@ async def run_requirement(
 
                 if tool_results:
                     messages.extend(tool_results)
+                    _prune_stale_snapshots(messages)
                 if pending_correction:
                     messages.append({"role": "user", "content": pending_correction})
                     pending_correction = None
 
             if not verdict:
-                verdict = {
-                    "status": "fail",
-                    "actual": f"No verdict after {MAX_TURNS} turns",
-                    "reasoning": "Turn budget exhausted",
-                }
+                # Turn budget exhausted — try to extract a verdict from conversation history
+                # before hard-failing. This produces a useful actual/reasoning instead of
+                # the generic "Turn budget exhausted" message.
+                verdict = await _extract_verdict(
+                    config, messages, req.get("then", ""), console
+                )
+                if not verdict:
+                    verdict = {
+                        "status": "fail",
+                        "actual": f"No verdict after {max_turns} turns",
+                        "reasoning": "Turn budget exhausted — extractor also failed",
+                    }
 
             duration = round(time.monotonic() - start, 1)
 
@@ -910,6 +1057,10 @@ async def run_requirement(
                 border_style=color,
             ))
 
+            cost = estimate_cost(config.resolved_model(), scenario_usage)
+            if cost is not None:
+                scenario_usage["cost_usd"] = round(cost, 6)
+
             return {
                 **verdict,
                 "id": req["id"],
@@ -921,6 +1072,7 @@ async def run_requirement(
                 "turns": turn + 1,
                 "provider": config.provider,
                 "model": config.resolved_model(),
+                "usage": scenario_usage,
             }
 
 

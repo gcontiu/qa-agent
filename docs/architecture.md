@@ -112,6 +112,71 @@ Beyond the basic call, `complete()` implements:
 
 **When-action guardrail:** if the executor reports `status=pass` but the When clause contained an action verb (`apasă`, `click`, `completează`, etc.) and no corresponding tool call was made, the verdict is blocked. A corrective message is injected and the model has up to `_MAX_WHEN_RETRIES` (2) attempts to perform the action before the verdict is forced to `fail`.
 
+### Token cost optimisation
+
+Three layers reduce token consumption for Anthropic runs. Together they cut a 36-scenario suite from ~$10 (baseline) to ~$1–1.50.
+
+#### 1. Prompt caching (`router.py` — `_apply_anthropic_cache_control`)
+
+Applied automatically for every Anthropic call. Two cache breakpoints are set:
+
+| Breakpoint | What is cached | Cache write cost | Cache read cost |
+|---|---|---|---|
+| First system message | System prompt (~3K tokens) | 1.25× input | 0.1× input |
+| Last tool definition | All 23 tool definitions (~6K tokens) | 1.25× input | 0.1× input |
+
+For a 4-turn scenario the static 9K (system + tools) drops from 9K × 4 = 36K billed at full rate to one cache write (~11K) + three reads (~2.7K) = **~14K effective**. Across consecutive scenarios within the 5-minute TTL the cache persists, so scenario N+1 pays only cache reads on system + tools.
+
+Implementation: `_apply_anthropic_cache_control(messages, tools)` converts the system message from a plain string to a `content` array with `cache_control: {type: "ephemeral"}`, and adds the same marker to the last tool dict. Does not mutate caller data.
+
+#### 2. Stale snapshot pruning (`agent.py` — `_prune_stale_snapshots`)
+
+After each turn's tool results are appended to the message history, all but the most recent `browser_snapshot` result are replaced with the placeholder `"[snapshot superseded — see latest snapshot above]"`. Old snapshots contain refs that no longer exist on the current page and serve no purpose in later turns.
+
+Per scenario (avg 3 snapshots, 4 turns): without pruning the second and third snapshots are re-sent on every subsequent turn, accumulating ~75K duplicate tokens. With pruning only the latest ~25K snapshot is ever in the active context.
+
+The pruner identifies snapshot results by cross-referencing `tool_call_id` fields in assistant messages where `function.name == "browser_snapshot"`. The bootstrap snapshot (Ollama) and loop-guard snapshots are handled by the same logic.
+
+#### 3. Bounded snapshot depth (`agent.py` — `QA_SNAPSHOT_DEPTH`)
+
+When the model calls `browser_snapshot` without a `depth` argument, the executor injects `depth=5` (configurable via `QA_SNAPSHOT_DEPTH`). Without a depth limit, MCP returns the full accessibility tree; on dense sites like alconind.ro this can exceed 1 500 nodes and 30K tokens per snapshot.
+
+The model can override by explicitly passing `depth: N` in its tool call. The loop guard's corrective snapshot also uses `QA_SNAPSHOT_DEPTH`.
+
+`QA_BOOTSTRAP_DEPTH` (Ollama bootstrap, default 5) is a separate knob for the pre-injection snapshot.
+
+#### 4. Bootstrap (shared) + single-shot for Then-only scenarios (`agent.py`)
+
+`_bootstrap()` pre-executes `browser_navigate` + `browser_snapshot` and returns the snapshot text plus the conversation messages and `actions_log` entries to merge into caller state. Used by both Ollama (initiates tool calls reliably for small models) and Anthropic (eliminates redundant first-turn navigation, feeds single-shot).
+
+For scenarios with no `When` clause (`then_only = True`) on Anthropic, `_single_shot_verify()` skips the tool loop entirely. It calls the LLM with **only `report_result` available and `tool_choice="required"`**, forcing a structured tool call. The tool's enum schema (`["pass", "fail"]`) guarantees the verdict is well-formed across providers (Anthropic, OpenAI, Together.ai) — more reliable than `response_format=json_object`, which has inconsistent translation in LiteLLM.
+
+Benefits per Then-only scenario (~25 of 33 in alconind):
+- Eliminates tool definitions from the call (~6K tokens)
+- Eliminates multi-turn snapshot accumulation
+- 1 LLM call instead of 3–4
+
+If single-shot fails (parse error, no tool call, exception), the code falls through to the full tool loop with messages already populated by bootstrap.
+
+#### 5. Configurable turn budget + verdict extraction on timeout (`agent.py`)
+
+`QA_MAX_TURNS` (default 12 for Anthropic, 25 for Ollama) caps the tool loop. When the budget is exhausted, `_extract_verdict` is called on the conversation history before hard-failing — producing a real `actual`/`reasoning` verdict instead of `"Turn budget exhausted"`.
+
+In the second measured run, 5 scenarios consumed 25 turns each, accounting for ~50% of total token spend. With `max_turns=12` those scenarios are bounded to ≤48% of that budget.
+
+#### Cost trajectory (alconind.ro)
+
+| Configuration | Scenarios | Cost (Haiku) | Pass rate |
+|---|---|---|---|
+| No caching, no pruning, no depth limit (baseline) | 42 | ~$10 (extrapolated) | n/a |
+| + Prompt caching only | 36 | ~$3 (measured) | 19/36 (53%) |
+| + Pruning + depth + bootstrap + single-shot (buggy) | 33 | $2.40 (measured) | 14/33 (42%) ⚠ |
+| + Bug fixes (forced-tool single-shot, message injection) | 33 | ~$1.50 (estimated) | TBD |
+
+The third row reflects a buggy intermediate where Anthropic bootstrap didn't populate `messages` and `response_format=json_object` failed silently — costs dropped but pass rate regressed. Both bugs were fixed by extracting `_bootstrap()` (shared with Ollama) and switching single-shot to forced `report_result` tool calls.
+
+---
+
 ### Ollama specifics
 
 Ollama runs are configured differently from remote API calls:

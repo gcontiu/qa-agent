@@ -29,13 +29,12 @@ finish_analysis(summary="<what you found>", file_count=<N>)
 1. **Navigate to the root URL** and take a snapshot.
 2. **Extract navigation links** from the snapshot (nav bar, header, footer).
 3. **Visit each distinct page** (navigate → snapshot → extract key elements).
-4. **Identify on each page:**
-   - Page title / heading
-   - Main content sections
-   - CTAs (buttons, forms, call-to-action links)
-   - Lists, tables, key data
-   - Modal dialogs or overlays (if triggered by common actions)
-5. **Generate scenarios** for what you actually observed. Never invent content.
+4. **For each page, list only what you literally see in the snapshot:**
+   - Page title / heading (exact text)
+   - Visible content sections (what is rendered, not what *might* be there)
+   - Buttons, links, and forms that are present in the accessibility tree
+   - Lists or tables with actual data in them
+5. **Write scenarios only for elements you listed in step 4.** If you did not see it in the snapshot, do not write a scenario for it.
 6. **Write feature files** — one per page/section (max ~10 scenarios per file).
 7. **Write config.yaml** with product metadata.
 
@@ -75,20 +74,43 @@ Write scenario descriptions in the same language as the site. Step text (Given/W
 ### Quality rules
 
 - One assertion per `Then` or `And` step — keep steps granular.
-- Write only what you observed. Never add scenarios for features you did not see.
+- **EVIDENCE RULE: Every scenario must be backed by something you literally observed in a snapshot.** Before writing each scenario, ask: "Can I point to a specific element, text, or ref in my last snapshot that proves this feature exists?" If the answer is no, do not write the scenario.
 - Prefer observable outcomes ("este vizibil", "conține", "se deschide") over implementation details.
 - Cover: page load, primary content, navigation CTAs, forms, lists, important links.
 - Skip: pixel-level styling, browser chrome, unrelated third-party widgets.
 
+### Common failure modes to avoid
+
+These are scenarios that look plausible but must NOT be written unless you observed them:
+
+| Invented scenario | Only write if you saw... |
+|---|---|
+| Blog/article search field | An actual search `<input>` in the snapshot |
+| Category filter sidebar | Actual filter buttons or a sidebar with category links |
+| Social share buttons on articles | Share icons visible in the article accessibility tree |
+| Downloadable PDF/template | A download `<a href=".pdf">` or similar link |
+| Department-specific contacts | Separate sections for Sales, Support, etc. with their own contact details |
+| Embedded map | An `<iframe>` or map element in the snapshot, not just a "View on Maps" link |
+| Privacy policy / GDPR page | The actual page resolving without a 404 — verify by navigating to it |
+
+If a feature is common on similar sites but absent from this one, **do not write it**.
+
 ## config.yaml format
 
 ```yaml
-name: <Product Name>
-description: <One-line product description>
-environments:
-  production:
-    base_url: <full root URL, no trailing slash>
-default_environment: production
+meta:
+  name: "<Product Name>"
+  version: "1.0"
+  target:
+    type: web
+    environments:
+      prod:
+        url: <full root URL, no trailing slash>
+    default_environment: prod
+
+context: |
+  <2-4 sentences describing the product, language, key pages, and notable UI elements
+   observed during exploration. Used as context for the QA executor.>
 ```
 
 ## CRITICAL: Tool use protocol

@@ -31,7 +31,3 @@ Feature: Alcon Ind — Pagina Contact
     Then contacte pentru departamente (vânzări, suport tehnic, etc.) sunt vizibile
     And fiecare departament are o metodă de contact disponibilă
 
-  @id:AC-305 @priority:low
-  Scenario: Link de urmărire pe rețelele sociale este disponibil
-    Then link-uri către profile de rețele sociale (LinkedIn, Facebook) sunt vizibile
-    And link-urile sunt funcționale și deschid paginile corecte

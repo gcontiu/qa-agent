@@ -34,12 +34,6 @@ Feature: Alcon Ind — Pagina Cerere Ofertă
     And informația că o echipă va contacta utilizatorul este prezentă
     And un email de confirmare sau referință comenzi este furnizat
 
-  @id:AC-405 @priority:medium
-  Scenario: Documentație descărcabilă pentru cerere ofertă
-    Then un link pentru descărcarea unui șablon de cerere ofertă este vizibil
-    And informații despre cum să completeze cererea sunt disponibile
-    And formatul documentului este clar indicat (PDF, Excel, etc.)
-
   @id:AC-406 @priority:low
   Scenario: Chat live sau asistență în timp real
     Then o opțiune de contact live (chat, WhatsApp, Viber) este vizibilă

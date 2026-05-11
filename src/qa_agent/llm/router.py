@@ -116,6 +116,38 @@ def ensure_provider_running(config: "LLMConfig") -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pricing (USD per million tokens) — Anthropic models as of 2026-05
+# ---------------------------------------------------------------------------
+
+_PRICING: dict[str, tuple[float, float, float, float]] = {
+    # model: (input, output, cache_write, cache_read)
+    "claude-haiku-4-5-20251001": (0.80,  4.00,  1.00, 0.08),
+    "claude-sonnet-4-6":         (3.00,  15.00, 3.75, 0.30),
+    "claude-opus-4-7":           (15.00, 75.00, 18.75, 1.50),
+}
+
+
+def estimate_cost(model: str, usage: dict) -> float | None:
+    """Return estimated USD cost from a usage accumulator dict, or None if unknown model."""
+    p = _PRICING.get(model)
+    if not p:
+        return None
+    inp, out, cw, cr = p
+    # Billed input = regular input (not cached) = total input - cache writes - cache reads
+    regular_input = (
+        usage.get("input_tokens", 0)
+        - usage.get("cache_write_tokens", 0)
+        - usage.get("cache_read_tokens", 0)
+    )
+    return (
+        max(regular_input, 0) * inp / 1_000_000
+        + usage.get("output_tokens", 0) * out / 1_000_000
+        + usage.get("cache_write_tokens", 0) * cw / 1_000_000
+        + usage.get("cache_read_tokens", 0) * cr / 1_000_000
+    )
+
+
+# ---------------------------------------------------------------------------
 # Default models per role
 # ---------------------------------------------------------------------------
 
@@ -145,7 +177,10 @@ _DEFAULTS = {
 # Per-model timeout defaults. Ollama entries are keyed by model name;
 # "__default__" covers any model not explicitly listed.
 _LLM_TIMEOUT_DEFAULTS: dict = {
-    "anthropic": 30,
+    "anthropic": {
+        "claude-opus-4-7": 120,  # Opus needs more time on long analyst conversations
+        "__default__": 30,
+    },
     "together_ai": {
         "meta-llama/Llama-3.3-70B-Instruct-Turbo": 60,  # cloud GPU, ~5-10s/turn
         "__default__": 30,                               # smaller models even faster
@@ -263,12 +298,55 @@ def _verbose_log(config: "LLMConfig", response) -> None:
         print(f"{label} TEXT  {content}", file=sys.stderr, flush=True)
 
 
+def _apply_anthropic_cache_control(
+    messages: list[dict], tools: list[dict] | None
+) -> tuple[list[dict], list[dict] | None]:
+    """Mark the system prompt and tool definitions as Anthropic cache breakpoints.
+
+    Cache writes cost 1.25× input; cache reads cost 0.1×. For a 4-turn scenario
+    the static 9K (system + 23 tools) drops from ~36K re-billed inputs to ~12K.
+    Across back-to-back scenarios within the 5-min TTL it improves further.
+
+    Returns new lists — does not mutate caller data.
+    """
+    messages = list(messages)
+
+    # First system message: convert plain string to content-array with cache marker.
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "system":
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                messages[i] = {
+                    **msg,
+                    "content": [{"type": "text", "text": content,
+                                 "cache_control": {"type": "ephemeral"}}],
+                }
+            elif isinstance(content, list) and content:
+                # Already an array; add cache marker to last block if missing.
+                if "cache_control" not in content[-1]:
+                    content = list(content)
+                    content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+                    messages[i] = {**msg, "content": content}
+            break
+
+    # Last tool definition: marks the end of the tool-list cache block.
+    if tools:
+        tools = list(tools)
+        last = dict(tools[-1])
+        last["cache_control"] = {"type": "ephemeral"}
+        tools[-1] = last
+
+    return messages, tools
+
+
 def complete(
     config: LLMConfig,
     messages: list[dict],
     tools: list[dict] | None = None,
     max_tokens: int = 2048,
     response_format: dict | None = None,
+    tool_choice: str | dict | None = None,
+    _usage: dict | None = None,
 ):
     """
     Unified LLM call. Returns a LiteLLM ModelResponse (OpenAI-compatible).
@@ -280,22 +358,41 @@ def complete(
       - Ollama    → {"format": "json"} in the request body
       - OpenAI / Together.ai → passed through as-is
     """
+    if config.provider == "anthropic":
+        messages, tools = _apply_anthropic_cache_control(messages, tools)
+
+    # These Anthropic models have deprecated the temperature parameter entirely.
+    # All other models (including haiku, sonnet) still accept it for determinism.
+    _TEMPERATURE_DEPRECATED = {"claude-opus-4-7"}
+
+    _temp_env = os.getenv("QA_TEMPERATURE")
+    _skip_temp = (
+        config.provider == "anthropic"
+        and config.resolved_model() in _TEMPERATURE_DEPRECATED
+        and _temp_env is None  # honour explicit override even on deprecated models
+    )
     kwargs: dict = dict(
         model=config.litellm_model(),
         messages=messages,
         max_tokens=max_tokens,
         timeout=config.llm_timeout,
-        temperature=float(os.getenv("QA_TEMPERATURE", "0")),
         **config.extra_kwargs(),
     )
+    if not _skip_temp:
+        kwargs["temperature"] = float(_temp_env or "0")
     if tools:
         kwargs["tools"] = tools
-        # tool_choice is opt-in via QA_TOOL_CHOICE=required.
-        # "required" helps models that output test plans instead of tool calls (e.g. llama3.1:8b).
-        # Do NOT enable by default: qwen2.5:7b regresses (loops on browser_snapshot forever).
-        tc = os.getenv("QA_TOOL_CHOICE", "").lower()
-        if tc == "required":
-            kwargs["tool_choice"] = "required"
+        # Per-call override takes precedence over the QA_TOOL_CHOICE env var.
+        # tool_choice="required" forces the model to call one of the provided tools —
+        # used by single-shot verdict to guarantee a structured report_result call.
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
+        else:
+            # QA_TOOL_CHOICE=required helps models that output test plans instead of
+            # tool calls (e.g. llama3.1:8b). Not default: qwen2.5:7b loops forever with it.
+            tc = os.getenv("QA_TOOL_CHOICE", "").lower()
+            if tc == "required":
+                kwargs["tool_choice"] = "required"
 
     if response_format:
         kwargs["response_format"] = response_format
@@ -308,6 +405,22 @@ def complete(
             response = litellm.completion(**kwargs)
             if os.getenv("QA_VERBOSE_LLM", "").lower() in ("1", "true"):
                 _verbose_log(config, response)
+            if _usage is not None and hasattr(response, "usage") and response.usage:
+                u = response.usage
+                _usage["input_tokens"] = (
+                    _usage.get("input_tokens", 0) + getattr(u, "prompt_tokens", 0)
+                )
+                _usage["output_tokens"] = (
+                    _usage.get("output_tokens", 0) + getattr(u, "completion_tokens", 0)
+                )
+                _usage["cache_write_tokens"] = (
+                    _usage.get("cache_write_tokens", 0)
+                    + getattr(u, "cache_creation_input_tokens", 0)
+                )
+                _usage["cache_read_tokens"] = (
+                    _usage.get("cache_read_tokens", 0)
+                    + getattr(u, "cache_read_input_tokens", 0)
+                )
             return response
         except litellm.RateLimitError:
             if attempt >= max_retries:

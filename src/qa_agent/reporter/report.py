@@ -146,14 +146,37 @@ def write_run(
     # --- telemetry.json ---
     total_actions = sum(len(r.get("actions_log", [])) for r in results)
     total_duration = sum(r.get("duration_s", 0) for r in results)
-    telemetry = {
+
+    # Aggregate token usage from individual scenario results
+    agg: dict[str, int | float] = {}
+    per_scenario_usage = []
+    for r in results:
+        u = r.get("usage") or {}
+        for key in ("input_tokens", "output_tokens", "cache_write_tokens", "cache_read_tokens"):
+            agg[key] = agg.get(key, 0) + u.get(key, 0)
+        if "cost_usd" in u:
+            agg["cost_usd"] = round(agg.get("cost_usd", 0.0) + u["cost_usd"], 6)
+        if u:
+            per_scenario_usage.append({
+                "requirement_id": r.get("id", ""),
+                **{k: u[k] for k in ("input_tokens", "output_tokens",
+                                     "cache_write_tokens", "cache_read_tokens",
+                                     "cost_usd") if k in u},
+            })
+
+    telemetry: dict = {
         "run_id": run_id,
+        "requirements_count": len(results),
         "total_actions": total_actions,
         "total_duration_s": round(total_duration, 1),
-        "requirements_count": len(results),
         "avg_actions_per_requirement": round(total_actions / max(len(results), 1), 1),
         "report_generated_by": "template",
     }
+    if agg:
+        telemetry["tokens"] = agg
+    if per_scenario_usage:
+        telemetry["per_scenario"] = per_scenario_usage
+
     (run_dir / "telemetry.json").write_text(
         json.dumps(telemetry, indent=2, ensure_ascii=False)
     )

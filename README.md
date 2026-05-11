@@ -73,8 +73,10 @@ Per-model LLM timeout defaults (Ollama):
 |---|---|---|
 | `QA_FORCE_SLIM` | _(auto)_ | `true` = 8-tool slim set; `false` = full 21-tool set; unset = auto (slim for Ollama, full for Anthropic) |
 | `QA_TOOL_CHOICE` | _(unset)_ | Set to `required` to force tool calls on every turn (fixes llama3.1:8b planning loop; breaks qwen2.5:7b) |
-| `QA_NO_BOOTSTRAP` | _(unset)_ | Set to `true` to disable bootstrap navigation pre-injection for Ollama |
-| `QA_BOOTSTRAP_DEPTH` | `5` | Accessibility tree depth for the bootstrap snapshot. Reduce to `3` on dense pages to shrink input context |
+| `QA_NO_BOOTSTRAP` | _(unset)_ | Set to `true` to disable bootstrap navigation pre-injection (applies to both Ollama and Anthropic) |
+| `QA_BOOTSTRAP_DEPTH` | `5` | Accessibility tree depth for the Ollama bootstrap snapshot. Reduce to `3` on dense pages to shrink input context |
+| `QA_SNAPSHOT_DEPTH` | `5` | Default accessibility tree depth for mid-loop `browser_snapshot` calls. Applied when the model omits depth; model can override by passing `depth` explicitly |
+| `QA_MAX_TURNS` | `12` (Anthropic) / `25` (Ollama) | Max LLM turns per scenario before forcing verdict extraction. Lower = cheaper; raise if complex flows need more turns |
 | `QA_LOOP_THRESHOLD` | `1` | Max executions of the same (tool, target) before the loop guard blocks it. At threshold=1, each navigation target can be clicked at most once — the second attempt is blocked, a fresh snapshot is taken, and the model is told to verify Then conditions instead |
 
 ### Ollama context window

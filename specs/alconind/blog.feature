@@ -15,19 +15,3 @@ Feature: Alcon Ind — Pagina Blog și Articole
     Then articolul se deschide și conținutul complet este vizibil
     And data publicării și autorul sunt afișate
 
-  @id:AC-502 @priority:medium
-  Scenario: Categoriile articolelor sunt filtrate
-    Then o meniu lateral sau butoane de filtrare a categoriilor sunt vizibile
-    And categoriile includ teme relevante industriei (inovație, durabilitate, etc.)
-    And filtrarea reduce corect lista de articole
-
-  @id:AC-503 @priority:medium
-  Scenario: Funcție de căutare în blog
-    Then un câmp de căutare este disponibil pe pagină
-    And căutarea după cuvinte-cheie returnează articole relevante
-    And mesaj "Nicio articol găsită" este afișat dacă nu există rezultate
-
-  @id:AC-504 @priority:low
-  Scenario: Opțiuni de partajare pe rețelele sociale
-    Then butoane de Share pe Facebook, LinkedIn sunt vizibile la fiecare articol
-    Then o opțiune de copiere a link-ului articolului este disponibilă

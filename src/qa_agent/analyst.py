@@ -205,6 +205,8 @@ async def run_analysis(
                         filename = Path(args.get("filename", f"file_{turn}.feature")).name
                         content = args.get("content", "")
                         written_files[filename] = content
+                        path = output_dir / filename
+                        path.write_text(content, encoding="utf-8")
                         console.print(
                             f"  [dim green]→ write_feature_file({filename!r}, "
                             f"{len(content)} chars)[/dim green]"
@@ -212,7 +214,7 @@ async def run_analysis(
                         tool_results.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": f"OK: {filename} staged for writing.",
+                            "content": f"OK: {filename} written to {path}.",
                         })
 
                     elif name == "finish_analysis":
@@ -249,12 +251,9 @@ async def run_analysis(
                 if finished:
                     break
 
-    # Flush files to disk
     console.print()
-    for filename, content in written_files.items():
-        path = output_dir / filename
-        path.write_text(content, encoding="utf-8")
-        console.print(f"[green]✓[/green] {path}")
+    for filename in written_files:
+        console.print(f"[green]✓[/green] {output_dir / filename}")
 
     duration = round(time.monotonic() - start, 1)
     summary = finished.get("summary", "incomplete") if finished else "incomplete — finish_analysis not called"

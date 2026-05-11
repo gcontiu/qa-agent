@@ -1,0 +1,18 @@
+meta:
+  name: "Alcon Ind"
+  version: "1.0"
+  target:
+    type: web
+    environments:
+      prod:
+        url: https://www.alconind.ro
+    default_environment: prod
+
+context: |
+  Alcon Ind este un distribuitor român de produse metalurgice (țevi, profile laminate la cald, tablă metalică)
+  cu sediul în Târgu Mureș, județul Mureș. Site-ul este în română.
+  Pagini principale: Acasă, Produse (cu subcategorii), Despre Noi, Contact, Cerere Ofertă, Blog.
+  Formularul de cerere ofertă conține câmpuri: Nume, Telefon, Firmă, Email, Localitate,
+  Categorie produs (butoane: Țevi / Profile Laminate la Cald / Tablă / Nu știu), Descriere.
+  Contact: telefon/WhatsApp 0745.593.587, adresă Str. Infratirii nr. 28/15 Târgu Mureș.
+  Program: Luni–Vineri 08:00–17:00.

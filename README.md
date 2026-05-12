@@ -20,6 +20,12 @@ uv run qa-agent list-runs
 
 # Show a report
 uv run qa-agent show-report <run-id>
+
+# Analyze a site and auto-generate Gherkin specs (full site)
+uv run qa-agent analyze <url> -d "<description>" -p <PREFIX> -o specs/<name>
+
+# Analyze a site — scoped to specific pages only (faster, cheaper on large sites)
+uv run qa-agent analyze <url> -d "<description>" -p <PREFIX> --pages "/,/about,/contact" -o specs/<name>
 ```
 
 `uv` manages the Python 3.12 virtualenv automatically. No manual `pip install` needed.
@@ -67,6 +73,12 @@ Per-model LLM timeout defaults (Ollama):
 | `qwen2.5:32b` | 150s |
 | _(all others)_ | 120s |
 
+### Analyst behaviour
+
+| Flag / Variable | Default | Description |
+|---|---|---|
+| `--pages` | _(unset — explore whole site)_ | Comma-separated URL paths for the analyst to visit. When set, the analyst skips link discovery and navigates directly to each listed path. Use on large sites (news, e-commerce) to keep cost predictable. Generated `config.yaml` records the scope under `meta.scope.pages`. |
+
 ### Execution behaviour
 
 | Variable | Default | Description |
@@ -101,6 +113,26 @@ Per-model LLM timeout defaults (Ollama):
 ---
 
 ## Example runs
+
+### Analyst — generate specs
+
+```bash
+# Full site exploration (small sites, ~10 pages)
+uv run qa-agent analyze https://www.alconind.ro \
+  -d "Distribuitor B2B de produse metalurgice (țevi, profile, tablă). Site în română." \
+  -p AC -o specs/alconind-v2
+
+# Scoped to specific pages (large sites — news, e-commerce)
+uv run qa-agent analyze https://newspaper.ro \
+  -d "Romanian news portal" -p NWS \
+  --pages "/,/politica,/sport,/economie,/cultura,/contact" \
+  -o specs/newspaper
+
+# Opus analyst (higher quality specs, ~$1.40 for a 10-page site)
+uv run qa-agent analyze https://www.alconind.ro \
+  --analyst-model claude-opus-4-7 \
+  -d "..." -p AC -o specs/alconind-v2
+```
 
 ### Anthropic
 

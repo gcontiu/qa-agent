@@ -234,9 +234,11 @@ def analyze(
     output: Path = typer.Option(None, "--output", "-o", help="Output directory for spec files (default: specs/<prefix.lower()>)"),
     analyst_provider: str = typer.Option(None, "--analyst-provider", help="LLM provider for analyst role"),
     analyst_model: str = typer.Option(None, "--analyst-model", help="Model name override for analyst"),
+    pages: str | None = typer.Option(None, "--pages", help="Comma-separated URL paths to explore, e.g. '/,/about,/contact'. Omit to explore the whole site."),
 ):
     """Analyze a product site and auto-generate Gherkin feature files."""
     out_dir = output or Path("specs") / prefix.lower()
+    pages_list = [p.strip() for p in pages.split(",")] if pages else None
 
     llm = LLMConfig.from_env(role="analyst")
     if analyst_provider:
@@ -245,10 +247,11 @@ def analyze(
         llm.model = analyst_model
 
     console.print(f"\n[bold]Analyzing:[/bold] {url}")
-    console.print(f"[dim]Provider: {llm.provider}/{llm.resolved_model()}  │  Output: {out_dir}[/dim]\n")
+    scope_note = f"  │  Pages: {pages}" if pages_list else ""
+    console.print(f"[dim]Provider: {llm.provider}/{llm.resolved_model()}  │  Output: {out_dir}{scope_note}[/dim]\n")
 
     try:
-        result = asyncio.run(run_analysis(url, description, out_dir, prefix, llm))
+        result = asyncio.run(run_analysis(url, description, out_dir, prefix, llm, pages=pages_list))
     except Exception as e:
         console.print(f"[red]Analysis failed:[/red] {e}")
         raise typer.Exit(2)

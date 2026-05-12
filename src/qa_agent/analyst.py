@@ -90,14 +90,25 @@ def _system_prompt() -> str:
     return (PROMPTS_DIR / "analyst_system.md").read_text()
 
 
-def _user_message(url: str, description: str, spec_prefix: str, output_dir: str) -> str:
-    return (
+def _user_message(url: str, description: str, spec_prefix: str, output_dir: str, pages: list[str] | None = None) -> str:
+    base = (
         f"Product URL: {url}\n"
         f"Product description: {description}\n"
         f"Scenario ID prefix: {spec_prefix}\n"
         f"Output directory: {output_dir}\n\n"
-        f"Explore the site systematically. Write a feature file for each distinct page "
-        f"or section, plus config.yaml. Call finish_analysis() when done."
+    )
+    if pages:
+        paths_block = "\n".join(f"  - {p}" for p in pages)
+        scope_yaml = "    pages:\n" + "\n".join(f'      - "{p}"' for p in pages)
+        return base + (
+            f"EXPLORE_ONLY — visit exactly these paths and no others:\n{paths_block}\n\n"
+            f"For each path: navigate → snapshot → write one feature file → move to next.\n"
+            f"In config.yaml, add this under `meta:`:\n  scope:\n{scope_yaml}\n\n"
+            f"Call finish_analysis() when all {len(pages)} paths are covered."
+        )
+    return base + (
+        "Explore the site systematically. Write a feature file for each distinct page "
+        "or section, plus config.yaml. Call finish_analysis() when done."
     )
 
 
@@ -111,6 +122,7 @@ async def run_analysis(
     output_dir: Path,
     spec_prefix: str = "SC",
     config: LLMConfig | None = None,
+    pages: list[str] | None = None,
 ) -> dict:
     """
     Crawl a product site and generate Gherkin feature files.
@@ -136,7 +148,8 @@ async def run_analysis(
         f"[bold]Analyst[/bold] — {url}  "
         f"[dim]({config.provider}/{config.resolved_model()})[/dim]"
     )
-    console.print(f"[dim]Prefix: {spec_prefix}  │  Output: {output_dir}[/dim]\n")
+    scope_note = f"  │  Pages: {len(pages)} scoped" if pages else ""
+    console.print(f"[dim]Prefix: {spec_prefix}  │  Output: {output_dir}{scope_note}[/dim]\n")
 
     server_params = _make_server_params()
 
@@ -165,7 +178,7 @@ async def run_analysis(
 
             messages: list[dict] = [
                 {"role": "system", "content": _system_prompt()},
-                {"role": "user", "content": _user_message(url, description, spec_prefix, str(output_dir))},
+                {"role": "user", "content": _user_message(url, description, spec_prefix, str(output_dir), pages)},
             ]
 
             start = time.monotonic()
@@ -281,6 +294,7 @@ async def run_analysis(
         "complete": finished is not None,
         "provider": config.provider,
         "model": config.resolved_model(),
+        "scoped_pages": pages,
     }
 
 

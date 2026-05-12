@@ -23,6 +23,7 @@ from rich.text import Text
 
 from qa_agent.llm import LLMConfig, complete, ensure_provider_running, _resolve_timeout, _TEST_TIMEOUT_DEFAULTS
 from qa_agent.llm.router import estimate_cost
+from qa_agent import browserbase
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -70,6 +71,13 @@ _ESSENTIAL_TOOLS = {
     "browser_type", "browser_fill_form", "browser_press_key",
     "browser_wait_for", "browser_select_option",
 }
+
+# Tools that must NOT be subject to the loop guard.
+# browser_evaluate: JS expressions are side-effect-free or intentional (e.g. repeated scrolls).
+# browser_press_key / browser_wait_for: idempotent or intentionally repeatable.
+_LOOP_GUARD_SKIP = frozenset({
+    "browser_snapshot", "browser_evaluate", "browser_press_key", "browser_wait_for",
+})
 
 
 def _mcp_to_openai_tools(tools_result, slim: bool = False) -> list[dict]:
@@ -403,16 +411,14 @@ async def _extract_verdict(
     console: Console,
     _usage: dict | None = None,
 ) -> dict | None:
-    """Last-resort verdict extraction using structured JSON output.
+    """Last-resort verdict extraction from the executor's conversation history.
 
-    Called when the executor loop ends without a report_result call and all
-    ghost fallbacks (A-G) have failed to parse a verdict.
-
-    Uses a dedicated `extractor` role (defaulting to the same provider as the
-    executor but a cheaper/faster model) with response_format=json_object so the
-    provider enforces valid JSON output regardless of model instruction-following.
-
-    Returns a verdict dict {status, actual, reasoning} or None if extraction fails.
+    Called when the executor loop ends without a report_result call.
+    Builds a clean 2-message conversation (system + one user turn) to avoid
+    the consecutive-user-message rejection that Anthropic enforces. Uses the
+    dedicated extractor_system.md prompt and relies on instruction-following
+    for JSON output rather than response_format (which LiteLLM translates to
+    an internal tool call for Anthropic, leaving message.content empty).
     """
     extractor_config = LLMConfig.from_env(role="extractor")
 
@@ -428,25 +434,85 @@ async def _extract_verdict(
         f"({extractor_config.provider}/{extractor_config.resolved_model()})[/dim yellow]"
     )
 
-    pruned = _prune_for_verdict(messages)
-    pruned.append({
-        "role": "user",
-        "content": (
-            f"Then clause to verify:\n{then_clause}\n\n"
-            "Based ONLY on the evidence above, respond with JSON: "
-            '{"status": "pass" or "fail", "actual": "...", "reasoning": "..."}'
-        ),
-    })
+    # Collect action names from the executor conversation
+    actions: list[str] = []
+    for m in messages:
+        if m.get("role") == "assistant":
+            for tc in m.get("tool_calls") or []:
+                name = (tc.get("function") or {}).get("name", "")
+                if name and name != "report_result":
+                    try:
+                        args = json.loads((tc.get("function") or {}).get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    url = args.get("url", "")
+                    actions.append(f"{name}({url})" if url else name)
+
+    # Build tool_call_id → tool_name index so we can filter by tool type below.
+    _tool_name_for: dict[str, str] = {}
+    for m in messages:
+        if m.get("role") == "assistant":
+            for tc in m.get("tool_calls") or []:
+                tc_id = tc.get("id", "")
+                tc_name = (tc.get("function") or {}).get("name", "")
+                if tc_id and tc_name:
+                    _tool_name_for[tc_id] = tc_name
+
+    def _is_useful_snapshot(msg: dict) -> bool:
+        content = msg.get("content", "")
+        if not isinstance(content, str) or len(content) < 50:
+            return False
+        if "[snapshot superseded" in content:
+            return False
+        return True
+
+    # Prefer the last browser_snapshot result — it is the accessibility tree.
+    # browser_evaluate results (e.g. "Result: undefined") are not page state.
+    last_snapshot: str = ""
+    for m in reversed(messages):
+        if m.get("role") == "tool":
+            if _tool_name_for.get(m.get("tool_call_id", "")) == "browser_snapshot":
+                if _is_useful_snapshot(m):
+                    last_snapshot = m["content"][:4000]
+                    break
+    # Fall back to any large tool result if no snapshot is available.
+    if not last_snapshot:
+        for m in reversed(messages):
+            if m.get("role") == "tool" and _is_useful_snapshot(m):
+                last_snapshot = m["content"][:4000]
+                break
+
+    # Single user message with all evidence — no consecutive user turns
+    evidence = ""
+    if actions:
+        evidence += f"Actions taken: {' → '.join(actions[:15])}\n\n"
+    if last_snapshot:
+        evidence += f"Last page state observed:\n{last_snapshot}\n\n"
+
+    user_content = (
+        f"Then clause to verify:\n{then_clause}\n\n"
+        + evidence
+        + "Based ONLY on the evidence above, respond with a JSON object."
+    )
+
+    clean_messages = [
+        {"role": "system", "content": (PROMPTS_DIR / "extractor_system.md").read_text()},
+        {"role": "user", "content": user_content},
+    ]
 
     try:
         response = complete(
             extractor_config,
-            pruned,
+            clean_messages,
             max_tokens=300,
-            response_format={"type": "json_object"},
             _usage=_usage,
         )
         content = (response.choices[0].message.content or "").strip()
+        # Strip markdown fences — some models wrap JSON in ```json ... ```
+        if content.startswith("```"):
+            content = re.sub(r"^```[^\n]*\n?", "", content)
+            content = re.sub(r"\n?```$", "", content.rstrip())
+            content = content.strip()
         parsed = json.loads(content)
         if (
             isinstance(parsed, dict)
@@ -466,8 +532,18 @@ async def _extract_verdict(
 # Playwright MCP server params (shared by executor and preflight)
 # ---------------------------------------------------------------------------
 
-def _make_server_params() -> StdioServerParameters:
-    """Build MCP server launch params. Browser is configurable via QA_BROWSER."""
+def _make_server_params(cdp_endpoint: str | None = None) -> StdioServerParameters:
+    """Build MCP server launch params.
+
+    If cdp_endpoint is given (Browserbase), connect to the remote browser via
+    CDP — no local browser is launched. Otherwise launch a local headless
+    browser with an isolated context per scenario (QA_BROWSER, default chromium).
+    """
+    if cdp_endpoint:
+        return StdioServerParameters(
+            command="npx",
+            args=["@playwright/mcp@latest", f"--cdp-endpoint={cdp_endpoint}"],
+        )
     browser = os.getenv("QA_BROWSER", "chromium")
     return StdioServerParameters(
         command="npx",
@@ -495,7 +571,16 @@ async def preflight_check() -> None:
 
     # Steps 2 + 3 — single MCP session
     browser = os.getenv("QA_BROWSER", "chromium")
-    server_params = _make_server_params()
+
+    # Browserbase: create a cloud session if configured
+    bb_session_id: str | None = None
+    cdp_endpoint: str | None = None
+    if browserbase.is_configured():
+        console.print("[dim]Browserbase: creating preflight session...[/dim]")
+        bb_session_id, cdp_endpoint = browserbase.create_session()
+        console.print(f"[green]✓[/green] Browserbase session {bb_session_id}")
+
+    server_params = _make_server_params(cdp_endpoint)
 
     try:
         async with stdio_client(server_params) as (read, write):
@@ -514,7 +599,7 @@ async def preflight_check() -> None:
                     f"({len(_ESSENTIAL_TOOLS)}/{len(_ESSENTIAL_TOOLS)} essential present)"
                 )
 
-                # Step 3 — real browser launch via HTTP (about:blank skips actual browser init)
+                # Step 3 — real browser launch
                 nav_result = await session.call_tool(
                     "browser_navigate", {"url": "https://playwright.dev"}
                 )
@@ -523,18 +608,22 @@ async def preflight_check() -> None:
                 )
                 _browser_error_markers = ("not installed", "is not found", "not found", "cannot find")
                 if any(m in nav_text.lower() for m in _browser_error_markers):
-                    console.print(f"[red]✗[/red] Browser '{browser}' not available")
-                    console.print(
-                        f"[dim]  Fix: npx @playwright/mcp install-browser {browser}[/dim]"
-                    )
-                    raise RuntimeError(f"Browser '{browser}' not available: {nav_text[:200]}")
-                console.print(f"[green]✓[/green] Browser '{browser}' responsive")
+                    label = "Browserbase" if cdp_endpoint else f"Browser '{browser}'"
+                    console.print(f"[red]✗[/red] {label} not available")
+                    if not cdp_endpoint:
+                        console.print(f"[dim]  Fix: npx @playwright/mcp install-browser {browser}[/dim]")
+                    raise RuntimeError(f"{label} not available: {nav_text[:200]}")
+                label = "Browserbase" if cdp_endpoint else f"Browser '{browser}'"
+                console.print(f"[green]✓[/green] {label} responsive")
 
     except RuntimeError:
         raise
     except Exception as e:
         console.print(f"[red]✗[/red] MCP server failed to start: {e}")
         raise RuntimeError(f"Playwright MCP failed: {e}") from e
+    finally:
+        if bb_session_id:
+            browserbase.delete_session(bb_session_id)
 
     console.print("[bold green]Preflight passed.[/bold green]\n")
 
@@ -576,7 +665,18 @@ async def run_requirement(
     console.print(f"[dim]Then: [/dim] {req['then']}")
     console.print()
 
-    server_params = _make_server_params()
+    # Browserbase: create a cloud session before starting Playwright MCP.
+    # Each scenario gets its own isolated session (equivalent to --isolated locally).
+    bb_session_id: str | None = None
+    cdp_endpoint: str | None = None
+    bb_session_start: float = 0.0
+    if browserbase.is_configured():
+        console.print("[dim]Browserbase: creating session...[/dim]")
+        bb_session_id, cdp_endpoint = browserbase.create_session()
+        bb_session_start = time.monotonic()
+        console.print(f"[dim]Browserbase session: {bb_session_id}[/dim]")
+
+    server_params = _make_server_params(cdp_endpoint)
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -627,12 +727,16 @@ async def run_requirement(
             then_only = not req.get("when", "").strip()
             if (config.provider == "anthropic" and then_only
                     and snap_text and verdict is None):
-                verdict = await _single_shot_verify(
+                _ss = await _single_shot_verify(
                     config, req, context, snap_text, console, _usage=scenario_usage
                 )
+                if _ss and _ss.get("status") == "pass":
+                    verdict = _ss
+                # fail falls through to tool loop — element may be below the fold
 
             bootstrap_count = len(actions_log)  # actions added by model start after this index
             action_counts: dict[str, int] = {}   # tracks (tool, primary_arg) repetitions
+            consecutive_snapshots = 0            # counts snapshot-only turns in a row
             loop_threshold = int(os.getenv("QA_LOOP_THRESHOLD", "1"))
             # Max turns: lower default for Anthropic (12) vs Ollama (25, where test_timeout is primary cap)
             _default_max_turns = MAX_TURNS if config.provider == "ollama" else 12
@@ -961,10 +1065,12 @@ async def run_requirement(
                             pending_correction = _c
                         break
 
-                    # Loop guard: block repeated non-snapshot actions BEFORE executing them.
+                    # Loop guard: block repeated stateful actions BEFORE executing them.
                     # Takes a fresh snapshot instead so the model has current page context.
                     # Threshold=1 means each unique (tool, target) can execute at most once.
-                    if name != "browser_snapshot":
+                    # _LOOP_GUARD_SKIP tools are exempt: they are idempotent or intentionally
+                    # repeatable (scrolling, waiting, key presses).
+                    if name not in _LOOP_GUARD_SKIP:
                         _primary = args.get("target") or args.get("url") or ""
                         _loop_key = f"{name}:{_primary}"
                         if action_counts.get(_loop_key, 0) >= loop_threshold:
@@ -994,10 +1100,13 @@ async def run_requirement(
                             continue
                         action_counts[_loop_key] = action_counts.get(_loop_key, 0) + 1
 
-                    # Bound snapshot depth to limit accessibility tree size.
-                    # Default 5; model can request deeper by passing depth explicitly.
-                    if name == "browser_snapshot" and "depth" not in args:
-                        args = {**args, "depth": int(os.getenv("QA_SNAPSHOT_DEPTH", "5"))}
+                    # Normalize snapshot args: strip targeted snapshots and bound depth.
+                    # Targeted snapshots (target=ref) give a narrow element-only view,
+                    # hiding the rest of the page — harmful for all models/providers.
+                    if name == "browser_snapshot":
+                        args = {k: v for k, v in args.items() if k != "target"}
+                        if "depth" not in args:
+                            args["depth"] = int(os.getenv("QA_SNAPSHOT_DEPTH", "5"))
 
                     args_preview = _esc_markup(json.dumps(args, ensure_ascii=False)[:100])
                     console.print(f"  [dim cyan]→ {name}({args_preview})[/dim cyan]")
@@ -1019,6 +1128,35 @@ async def run_requirement(
                 if tool_results:
                     messages.extend(tool_results)
                     _prune_stale_snapshots(messages)
+                    _last_action = next(
+                        (a["tool"] for a in reversed(actions_log[bootstrap_count:])), None
+                    )
+                    if _last_action in ("browser_snapshot", "browser_take_screenshot"):
+                        consecutive_snapshots += 1
+                    else:
+                        consecutive_snapshots = 0
+                    if not verdict:
+                        if consecutive_snapshots == 2:
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "You have taken consecutive snapshots without any other action. "
+                                    "If the target element is not visible, the page may need scrolling. "
+                                    "Call browser_evaluate with "
+                                    '{"expression": "window.scrollBy(0, 800)"} '
+                                    "to scroll down, then snapshot again."
+                                ),
+                            })
+                        elif consecutive_snapshots == 4:
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "You have now taken 4 consecutive snapshots. "
+                                    "If the target element is not visible after scrolling, "
+                                    "it is likely absent from this page. "
+                                    "Call report_result with your best verdict now."
+                                ),
+                            })
                 if pending_correction:
                     messages.append({"role": "user", "content": pending_correction})
                     pending_correction = None
@@ -1061,6 +1199,13 @@ async def run_requirement(
             if cost is not None:
                 scenario_usage["cost_usd"] = round(cost, 6)
 
+            bb_duration = (
+                round(time.monotonic() - bb_session_start, 1) if bb_session_id else None
+            )
+            if bb_session_id:
+                browserbase.delete_session(bb_session_id)
+                bb_session_id = None  # prevent double-delete
+
             return {
                 **verdict,
                 "id": req["id"],
@@ -1072,6 +1217,8 @@ async def run_requirement(
                 "turns": turn + 1,
                 "provider": config.provider,
                 "model": config.resolved_model(),
+                "browser": "browserbase" if cdp_endpoint else "local",
+                "bb_session_duration_s": bb_duration,
                 "usage": scenario_usage,
             }
 

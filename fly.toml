@@ -1,7 +1,7 @@
 # fly.toml — Fly.io deployment config for qa-agent (format v2)
 # Update `app` to match your Fly app name from the dashboard.
 
-app = "qa-agent"        # replace with your unique Fly app name
+app = "qa-agent-sp"
 primary_region = "arn"  # Stockholm — closest to Romania; change if needed
 
 [build]

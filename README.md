@@ -26,6 +26,10 @@ uv run qa-agent analyze <url> -d "<description>" -p <PREFIX> -o specs/<name>
 
 # Analyze a site — scoped to specific pages only (faster, cheaper on large sites)
 uv run qa-agent analyze <url> -d "<description>" -p <PREFIX> --pages "/,/about,/contact" -o specs/<name>
+
+# Start the HTTP API server (Phase 1 — cloud-readiness)
+uv run qa-agent serve                    # default 0.0.0.0:8000
+uv run qa-agent serve --port 9000 --reload  # dev mode with auto-reload
 ```
 
 `uv` manages the Python 3.12 virtualenv automatically. No manual `pip install` needed.
@@ -212,3 +216,36 @@ uv run qa-agent run specs/alconind --output reports/alconind-browserbase
 # and "bb_session_duration_s" in results/[].browser_metadata
 cat reports/alconind-browserbase/telemetry.json
 ```
+
+### HTTP API (Phase 1 cloud-readiness)
+
+Start the server:
+```bash
+uv run qa-agent serve
+```
+
+Then in another terminal:
+
+```bash
+# Create a run (returns run_id immediately, 202 Accepted)
+RUN_ID=$(curl -s -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{"spec_dir": "specs/alconind"}' | jq -r '.run_id')
+
+# Poll status until done
+curl http://localhost:8000/runs/$RUN_ID
+
+# Get the report (when done)
+curl http://localhost:8000/runs/$RUN_ID/report | jq '.summary'
+
+# Cancel a running run
+curl -X POST http://localhost:8000/runs/$RUN_ID/cancel
+
+# List all runs
+curl http://localhost:8000/runs
+
+# Health check
+curl http://localhost:8000/health
+```
+
+On server restart, any runs left in `running` or `pending` state are marked as `failed` with error "Interrupted by server restart". The status is persisted to disk so polling `GET /runs/{run_id}` works across server restarts.

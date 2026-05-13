@@ -246,6 +246,64 @@ Dual format support:
 
 ---
 
+## HTTP API (Phase 1 — cloud-readiness)
+
+The CLI is wrapped in a FastAPI server for cloud deployment. Runs are executed as asyncio background tasks, allowing clients to trigger and poll asynchronously.
+
+**Starting the server:**
+```bash
+uv run qa-agent serve [--host 0.0.0.0] [--port 8000] [--reload]
+```
+
+**Endpoints:**
+
+| Method | Path | Status | Purpose |
+|---|---|---|---|
+| POST | `/runs` | 202 Accepted | Create a run; returns run_id immediately; execution happens in background |
+| GET | `/runs` | 200 | List all runs (in-memory + disk) |
+| GET | `/runs/{run_id}` | 200 / 404 | Poll run status |
+| POST | `/runs/{run_id}/cancel` | 202 / 409 | Cancel a pending/running run (409 if already terminal) |
+| GET | `/runs/{run_id}/report` | 200 / 404 | Return report.json for a completed run |
+| GET | `/health` | 200 | Liveness probe |
+
+**Request body for `POST /runs`:**
+```json
+{
+  "spec_dir": "specs/alconind",
+  "env": null,
+  "output": "reports",
+  "only_failing": false,
+  "executor_provider": null,
+  "executor_model": null
+}
+```
+
+**Response body (all endpoints return `RunStatus`):**
+```json
+{
+  "run_id": "2026-05-13T08-41-28Z",
+  "status": "pending|running|done|failed|cancelled",
+  "spec_dir": "specs/alconind",
+  "started_at": "2026-05-13T08:41:28.552111+00:00",
+  "completed_at": null,
+  "summary": {"total": 73, "passed": 52, "failed": 21, "errored": 0},
+  "report_path": "reports/run-2026-05-13T08-41-28Z/report.json",
+  "error": null
+}
+```
+
+**Execution model:**
+
+Runs execute as independent asyncio tasks in the background. The server responds to requests immediately (`202 Accepted` for POST /runs, `200` for GET /runs/{run_id}). Clients poll `GET /runs/{run_id}` to track progress until status becomes `done`, `failed`, or `cancelled`.
+
+Status is persisted to `run_dir/run_status.json` so it survives server restarts. On server startup, any runs left in `running` or `pending` state are marked as `failed` with error "Interrupted by server restart" — preventing stale status from previous sessions.
+
+**Cancellation:**
+
+`POST /runs/{run_id}/cancel` requests the cancellation of a background task. The task stops at the next `await` point (typically between scenarios). Returns `409 Conflict` if the run is already in a terminal state (`done`, `failed`, `cancelled`) or if the task has no live asyncio reference (orphaned from a previous server session).
+
+---
+
 ## Output Contract
 
 Per-run artifacts under `reports/run-<ISO-timestamp>/`:

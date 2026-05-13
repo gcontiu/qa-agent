@@ -42,6 +42,23 @@ _runs: dict[str, dict] = {}
 _tasks: dict[str, asyncio.Task] = {}
 
 
+@app.on_event("startup")
+async def _mark_interrupted_runs() -> None:
+    """Mark any runs left in running/pending state as failed (interrupted by server restart)."""
+    for status_file in _DEFAULT_REPORTS_DIR.glob("run-*/run_status.json"):
+        try:
+            state = json.loads(status_file.read_text())
+            if state.get("status") in ("running", "pending"):
+                state.update({
+                    "status": "failed",
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "error": "Interrupted by server restart",
+                })
+                status_file.write_text(json.dumps(state, indent=2))
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Pydantic schemas
 # ---------------------------------------------------------------------------
@@ -236,9 +253,14 @@ async def cancel_run(run_id: str, output: str = "reports") -> RunStatus:
             detail=f"Run '{run_id}' is already {state['status']} — cannot cancel",
         )
 
-    if task and not task.done():
-        task.cancel()
+    if task is None or task.done():
+        # Status file says running but no live task — run was interrupted (server restart)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run '{run_id}' has no active task — it was likely interrupted by a server restart",
+        )
 
+    task.cancel()
     return RunStatus(**state)
 
 

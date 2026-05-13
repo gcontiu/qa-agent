@@ -1,6 +1,5 @@
-# fly.toml — Fly.io deployment config for qa-agent
-# Run `fly launch --no-deploy` to create the app and get a unique name,
-# then update `app` below and run `fly deploy`.
+# fly.toml — Fly.io deployment config for qa-agent (format v2)
+# Update `app` to match your Fly app name from the dashboard.
 
 app = "qa-agent"        # replace with your unique Fly app name
 primary_region = "arn"  # Stockholm — closest to Romania; change if needed
@@ -9,37 +8,33 @@ primary_region = "arn"  # Stockholm — closest to Romania; change if needed
 
 [env]
   PORT = "8080"
+  QA_BROWSER = "browserbase"  # cloud default; local dev uses local Playwright
 
 # Reports + SQLite state store live on a persistent volume.
 # Single-machine only — multi-instance needs Postgres + R2 (Phase 2 Step 5).
 [[mounts]]
-  source   = "qa_agent_reports"
+  source      = "qa_agent_reports"
   destination = "/app/reports"
 
-[[services]]
-  protocol    = "tcp"
+[http_service]
   internal_port = 8080
+  force_https   = true
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
 
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [services.concurrency]
-    type = "requests"
-    hard_limit = 10   # one run takes ~5 min; cap concurrent requests to avoid OOM
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 10
     soft_limit = 5
 
-  [[services.http_checks]]
-    interval      = "15s"
-    timeout       = "5s"
-    grace_period  = "30s"
-    method        = "GET"
-    path          = "/health"
+  [[http_service.checks]]
+    interval     = "15s"
+    timeout      = "5s"
+    grace_period = "30s"
+    method       = "GET"
+    path         = "/health"
 
-[vm]
+[[vm]]
   size   = "shared-cpu-1x"
   memory = "512mb"

@@ -306,12 +306,26 @@ fly logs
 
 ### Local Docker test (before deploying)
 
+Two variants depending on whether you want Browserbase or local Chromium:
+
 ```bash
+# --- Variant A: with Browserbase (mirrors Fly.io behaviour) ---
 docker build -t qa-agent .
 docker run --rm -p 8080:8080 \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   -e QA_BROWSERBASE_API_KEY=$QA_BROWSERBASE_API_KEY \
   -e QA_BROWSERBASE_PROJECT_ID=$QA_BROWSERBASE_PROJECT_ID \
+  -e QA_BROWSER=browserbase \
   qa-agent
+
+# --- Variant B: with local Chromium (no Browserbase needed) ---
+docker build --build-arg INSTALL_CHROMIUM=true -t qa-agent-local .
+docker run --rm -p 8080:8080 \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  qa-agent-local
+
+# Health check (both variants)
 curl http://localhost:8080/health
 ```
+
+> **Image sizes:** slim build (Variant A) ≈ 200 MB; with Chromium (Variant B) ≈ 1.5 GB.

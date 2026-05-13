@@ -4,7 +4,7 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
- && apt-get install -y nodejs \
+ && apt-get install -y nodejs npm \
  && rm -rf /var/lib/apt/lists/*
 
 # uv — fast Python package manager
@@ -14,11 +14,23 @@ WORKDIR /app
 
 # Install Python deps before copying source (cache layer)
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --no-dev \
+    --allow-insecure-host pypi.org \
+    --allow-insecure-host files.pythonhosted.org
 
 # Pre-install @playwright/mcp globally so npx finds it without a network fetch
 # on every cold start. The version here should match what agent.py requests.
-RUN npm install -g @playwright/mcp
+RUN npm config set strict-ssl false \
+ && npm install -g @playwright/mcp
+
+# Optional: install Chromium for local Docker testing (without Browserbase).
+# Fly.io deploy uses Browserbase (QA_BROWSER=browserbase in fly.toml) so
+# Chromium is not needed there — keeping the cloud image slim (~200MB vs ~1.5GB).
+# Usage: docker build --build-arg INSTALL_CHROMIUM=true -t qa-agent-local .
+ARG INSTALL_CHROMIUM=false
+RUN if [ "$INSTALL_CHROMIUM" = "true" ]; then \
+    npx playwright install --with-deps chromium; \
+    fi
 
 COPY src/ ./src/
 

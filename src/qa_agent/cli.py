@@ -1,5 +1,6 @@
 """CLI entrypoint — qa-agent run --spec <dir>"""
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -25,6 +26,12 @@ _STATE_DB = Path("reports/.state/runs.db")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _scenario_cap() -> int | None:
+    """Return QA_MAX_SCENARIOS env value, or None if unset/zero."""
+    raw = os.environ.get("QA_MAX_SCENARIOS", "").strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else None
+
 
 async def _execute_requirements(
     requirements, url: str, llm: LLMConfig, context: str = ""
@@ -95,6 +102,7 @@ def run(
     previous: str = typer.Option(None, "--previous", help="Run ID to use as baseline for --only-failing"),
     executor_provider: str = typer.Option(None, "--executor-provider", help="LLM provider: anthropic (default) or ollama"),
     executor_model: str = typer.Option(None, "--executor-model", help="Model name override for executor"),
+    max_scenarios: int = typer.Option(None, "--max-scenarios", help="Max scenarios to run (overrides QA_MAX_SCENARIOS)"),
 ):
     """Run all requirements from a spec directory."""
     start = time.monotonic()
@@ -130,6 +138,14 @@ def run(
                 f"[dim]--only-failing: re-running {len(requirements)} failed "
                 f"({len(skipped_results)} skipped — passed previously)[/dim]"
             )
+
+    cap = max_scenarios or _scenario_cap()
+    if cap and len(requirements) > cap:
+        console.print(
+            f"[yellow]Scenario cap:[/yellow] running first {cap} of {len(requirements)} "
+            f"(set QA_MAX_SCENARIOS or --max-scenarios to change)"
+        )
+        requirements = requirements[:cap]
 
     llm = LLMConfig.from_env(role="executor")
     if executor_provider:

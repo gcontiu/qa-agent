@@ -98,6 +98,7 @@ Browserbase provides an alternative to local browser management for cloud deploy
 
 | Variable | Default | Description |
 |---|---|---|
+| `QA_MAX_SCENARIOS` | _(unset — no cap)_ | Max scenarios to run per spec. Scenarios beyond the cap are silently dropped. Use `--max-scenarios N` on the CLI or `max_scenarios` in the HTTP API body to override per-run. Tier defaults: Free=25, Starter=30, Pro=75. |
 | `QA_FORCE_SLIM` | _(auto)_ | `true` = 8-tool slim set; `false` = full 21-tool set; unset = auto (slim for Ollama, full for Anthropic) |
 | `QA_TOOL_CHOICE` | _(unset)_ | Set to `required` to force tool calls on every turn (fixes llama3.1:8b planning loop; breaks qwen2.5:7b) |
 | `QA_NO_BOOTSTRAP` | _(unset)_ | Set to `true` to disable bootstrap navigation pre-injection (applies to both Ollama and Anthropic) |
@@ -161,6 +162,12 @@ uv run qa-agent run specs/alconind-smoke --output reports/alconind-smoke-haiku
 
 # Re-run only failures from last run
 uv run qa-agent run specs/alconind --only-failing
+
+# Cap at 25 scenarios (Free tier equivalent)
+uv run qa-agent run specs/alconind --max-scenarios 25 --output reports/alconind-capped
+
+# Cap via env var (applies to all runs in the session)
+QA_MAX_SCENARIOS=25 uv run qa-agent run specs/alconind
 ```
 
 ### Together.ai

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -70,6 +71,7 @@ class RunRequest(BaseModel):
     only_failing: bool = False
     executor_provider: str | None = None
     executor_model: str | None = None
+    max_scenarios: int | None = None  # overrides QA_MAX_SCENARIOS
 
 
 class RunSummary(BaseModel):
@@ -88,6 +90,12 @@ class RunStatus(BaseModel):
     summary: RunSummary | None = None
     report_path: str | None = None
     error: str | None = None
+
+
+def _scenario_cap() -> int | None:
+    """Return QA_MAX_SCENARIOS env value, or None if unset/zero."""
+    raw = os.environ.get("QA_MAX_SCENARIOS", "").strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else None
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +129,11 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
             failing = store.failing_ids(prev_run_id)
             requirements = [r for r in requirements if r.id in failing]
         store.close()
+
+    cap = req.max_scenarios or _scenario_cap()
+    if cap and len(requirements) > cap:
+        requirements = requirements[:cap]
+        state["capped_at"] = cap
 
     try:
         await preflight_check()

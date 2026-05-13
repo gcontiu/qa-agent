@@ -112,6 +112,49 @@ The key strategic insight: **don't self-host LLMs**. Inference APIs (Anthropic; 
 
 **Success criteria:** A new user can sign up, add a public product URL, review analyst-generated specs, run tests, view a report — all via the web UI. Cost transparent to user.
 
+#### Phase 2 — MVP implementation order
+
+Strict order. Each step gates the next; do not parallelize without reason.
+
+| # | Step | Why this step, why now |
+|---|------|------------------------|
+| 1 | **Validate pipeline on a 2nd site** (Phase 1 prereq) | Hard gate. If analyst/executor don't generalize, the rest is wasted work. ~$5, ~1 day. |
+| 2 | **Hardcoded scenario cap per request** (env `QA_MAX_SCENARIOS`) | Single biggest cost-blowup vector. Must land before any public access. Tiered caps come later. |
+| 3 | **Dockerfile + Fly.io deploy** of existing FastAPI (single process) | Prove cloud deploy works with current code. No queue yet — `BackgroundTasks` is enough at zero traffic. |
+| 4 | **Browserbase wired as default** (`QA_BROWSER=browserbase`) | Remove local Chromium dependency from server. Phase 1 task pulled forward. |
+| 5 | **Postgres schema** (`users`, `products`, `jobs`, `specs`, `reports`) via Supabase | Multi-tenancy foundation. `jobs` replaces in-memory `_runs` dict in `api.py`. |
+| 6 | **Own-auth: Clerk or Supabase Auth** + FastAPI JWT middleware | Users sign up to the SaaS. *Not* auth into the products being tested — that is Phase 3. |
+| 7 | **Per-user rate limit** (slowapi, ~20 LOC) | Prevents single-user cost runaway on day 1 of public access. |
+| 8 | **Next.js scaffold on Vercel**: login → new job → spec review → report | Three pages, shadcn/ui defaults. No design polish yet. |
+| 9 | **Spec viewer/editor (Monaco)** with explicit "Approve & Run" step | Mandatory human-in-the-loop between analyst and executor. Without it, analyst hallucinations create false-fail reports and erode trust. |
+| 10 | **Cost meter component** reading `telemetry.json` / `cost_usd` | Surfaces existing data. Decisive for user trust and perceived value. |
+| 11 | **Live run status page** (poll `GET /runs/{id}`) + final report view | Wraps existing endpoints; no new backend work. |
+
+**Stop here for closed beta.** Onboard 5–10 hand-picked users. Validate demand. Stripe + tiered scenario caps come *after* this stage answers "do people want this?".
+
+#### Phase 2 — Deferred from MVP
+
+Each item is deferred against a specific trigger. When the trigger fires, move it into the active scope; not before.
+
+| Deferred item | Trigger to reactivate |
+|---------------|----------------------|
+| **Redis queue (Upstash, `arq`/`rq`)** | >5 concurrent jobs observed, or `BackgroundTasks` lose runs on deploy/restart in production |
+| **Separate worker machine** (Fly process group) | Web requests start timing out due to worker CPU; or worker crashes take down API |
+| **R2/S3 for report storage** | Average `report.json` + evidence > 1 MB, or users request public report sharing links |
+| **Stripe billing + tiered plans** | Closed beta validates retention ≥ 30% week-2; until then, manual invoicing for paid users |
+| **Tiered scenario caps (Free/Starter/Pro)** | Stripe is live; before that, single hardcoded global cap |
+| **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue |
+| **Auth into *target products*** (form login, OAuth, 2FA, KMS vault — Phase 3) | ≥ 30% of beta users request testing of authenticated pages; or first paying customer makes it a deal-breaker |
+| **Retry logic + flaky-test badging** (Phase 4) | False-fail rate in production > 5%, measured over ≥ 100 runs |
+| **Self-hosted Playwright on Modal** | Browserbase spend > $1k/month |
+| **Multi-region deploy (EU)** | First EU customer with data residency requirement, or > 20% of users from EU |
+| **SAML SSO / SCIM / SOC2** (Phase 5) | First enterprise prospect blocks deal on it; until then, $0 spent |
+| **UI polish: dark mode, mobile, animations** | Beta feedback explicitly cites UI as a blocker (not vague "looks rough") |
+| **Spec versioning & migration tooling** | First breaking change to Gherkin schema with existing user specs in production |
+| **`fix-agent` integration / downstream consumers** | qa-agent itself is stable and 2+ users have asked for it |
+
+**Discipline rule:** if a deferred item is being discussed but its trigger has not fired, the answer is "not yet" — not "let's add it just in case". Premature scope is the failure mode for this kind of product.
+
 ### Phase 3 — Auth foundation + extensions (4 weeks, after MVP validates demand)
 
 **Goal:** Support testing of authenticated apps. Without this, the tool can only test public marketing pages. Triggered when first MVP users request it.

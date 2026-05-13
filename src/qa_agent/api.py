@@ -29,6 +29,8 @@ from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
 from qa_agent.specs import load_spec
 from qa_agent.state import StateStore
+from qa_agent.db import init as db_init, close as db_close
+from qa_agent.db import jobs as db_jobs
 
 app = FastAPI(title="qa-agent", version="0.1.0")
 
@@ -36,7 +38,7 @@ _DEFAULT_REPORTS_DIR = Path("reports")
 _STATE_DB = Path("reports/.state/runs.db")
 
 # In-memory registry: run_id → status dict.
-# Also persisted to run_dir/run_status.json for restartability.
+# Dual-written to Postgres when DATABASE_URL is set.
 _runs: dict[str, dict] = {}
 
 # Task registry: run_id → asyncio.Task (for cancellation).
@@ -44,8 +46,9 @@ _tasks: dict[str, asyncio.Task] = {}
 
 
 @app.on_event("startup")
-async def _mark_interrupted_runs() -> None:
-    """Mark any runs left in running/pending state as failed (interrupted by server restart)."""
+async def _startup() -> None:
+    await db_init()
+    await db_jobs.mark_interrupted()
     for status_file in _DEFAULT_REPORTS_DIR.glob("run-*/run_status.json"):
         try:
             state = json.loads(status_file.read_text())
@@ -58,6 +61,11 @@ async def _mark_interrupted_runs() -> None:
                 status_file.write_text(json.dumps(state, indent=2))
         except Exception:
             pass
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await db_close()
 
 
 # ---------------------------------------------------------------------------
@@ -181,18 +189,23 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
     failed_count = sum(1 for r in results if r.get("status") == "fail")
     errored = sum(1 for r in results if r.get("status") == "error")
 
+    summary = {
+        "total": len(results),
+        "passed": passed,
+        "failed": failed_count,
+        "errored": errored,
+    }
     state.update({
         "status": "done",
         "completed_at": datetime.now(timezone.utc).isoformat(),
-        "summary": {
-            "total": len(results),
-            "passed": passed,
-            "failed": failed_count,
-            "errored": errored,
-        },
+        "summary": summary,
         "report_path": str(run_dir / "report.json"),
     })
     _write_status_file(output_dir, run_id, state)
+    await db_jobs.update(run_id, status="done",
+        completed_at=datetime.now(timezone.utc),
+        summary=summary,
+        report_path=str(run_dir / "report.json"))
 
 
 def _mark_failed(run_id: str, state: dict, output_dir: Path, error: str) -> None:
@@ -202,6 +215,8 @@ def _mark_failed(run_id: str, state: dict, output_dir: Path, error: str) -> None
         "error": error,
     })
     _write_status_file(output_dir, run_id, state)
+    asyncio.ensure_future(db_jobs.update(run_id, status="failed",
+        completed_at=datetime.now(timezone.utc), error=error))
 
 
 def _write_status_file(output_dir: Path, run_id: str, state: dict) -> None:
@@ -229,6 +244,9 @@ async def create_run(req: RunRequest) -> RunStatus:
     }
     _runs[run_id] = state
     _write_status_file(output_dir, run_id, state)
+    await db_jobs.create(run_id, req.spec_dir,
+                         executor_model=req.executor_model,
+                         max_scenarios=req.max_scenarios)
 
     task = asyncio.create_task(_execute_job(run_id, req, output_dir))
     _tasks[run_id] = task

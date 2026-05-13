@@ -38,4 +38,4 @@ primary_region = "iad"  # US East (Virginia) — same region as Browserbase us-e
 
 [[vm]]
   size   = "shared-cpu-1x"
-  memory = "1gb"
+  memory = "2gb"

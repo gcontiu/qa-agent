@@ -2,7 +2,7 @@
 # Update `app` to match your Fly app name from the dashboard.
 
 app = "qa-agent-sp"
-primary_region = "arn"  # Stockholm — closest to Romania; change if needed
+primary_region = "iad"  # US East (Virginia) — same region as Browserbase us-east-1
 
 [build]
 

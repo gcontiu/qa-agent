@@ -1,0 +1,45 @@
+# fly.toml — Fly.io deployment config for qa-agent
+# Run `fly launch --no-deploy` to create the app and get a unique name,
+# then update `app` below and run `fly deploy`.
+
+app = "qa-agent"        # replace with your unique Fly app name
+primary_region = "arn"  # Stockholm — closest to Romania; change if needed
+
+[build]
+
+[env]
+  PORT = "8080"
+
+# Reports + SQLite state store live on a persistent volume.
+# Single-machine only — multi-instance needs Postgres + R2 (Phase 2 Step 5).
+[[mounts]]
+  source   = "qa_agent_reports"
+  destination = "/app/reports"
+
+[[services]]
+  protocol    = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "requests"
+    hard_limit = 10   # one run takes ~5 min; cap concurrent requests to avoid OOM
+    soft_limit = 5
+
+  [[services.http_checks]]
+    interval      = "15s"
+    timeout       = "5s"
+    grace_period  = "30s"
+    method        = "GET"
+    path          = "/health"
+
+[vm]
+  size   = "shared-cpu-1x"
+  memory = "512mb"

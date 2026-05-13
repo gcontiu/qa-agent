@@ -256,3 +256,62 @@ curl http://localhost:8000/health
 ```
 
 On server restart, any runs left in `running` or `pending` state are marked as `failed` with error "Interrupted by server restart". The status is persisted to disk so polling `GET /runs/{run_id}` works across server restarts.
+
+---
+
+## Cloud deploy (Fly.io)
+
+### First-time setup
+
+```bash
+# 1. Install flyctl
+brew install flyctl   # macOS; see https://fly.io/docs/hands-on/install-flyctl/
+
+# 2. Authenticate
+fly auth login
+
+# 3. Create the app (generates a unique name — copy it to fly.toml)
+fly launch --no-deploy
+
+# 4. Create persistent volume for reports + SQLite state
+fly volumes create qa_agent_reports --size 3 --region arn
+
+# 5. Set required secrets
+fly secrets set \
+  ANTHROPIC_API_KEY=<your-key> \
+  QA_BROWSERBASE_API_KEY=<your-key> \
+  QA_BROWSERBASE_PROJECT_ID=<your-project-id> \
+  QA_MAX_SCENARIOS=25
+
+# 6. Deploy
+fly deploy
+```
+
+### Re-deploy after code changes
+
+```bash
+fly deploy
+```
+
+### Check logs
+
+```bash
+fly logs
+```
+
+### Constraints (MVP — single machine)
+
+- `fly.toml` mounts one volume → one machine only. A second instance would have a different `reports/` volume and a split-brain in-memory `_runs` dict.
+- Runs in progress are lost on `fly deploy` (restart marks them as `failed`). Move to Postgres + background queue (Step 5) to fix this.
+
+### Local Docker test (before deploying)
+
+```bash
+docker build -t qa-agent .
+docker run --rm -p 8080:8080 \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -e QA_BROWSERBASE_API_KEY=$QA_BROWSERBASE_API_KEY \
+  -e QA_BROWSERBASE_PROJECT_ID=$QA_BROWSERBASE_PROJECT_ID \
+  qa-agent
+curl http://localhost:8080/health
+```

@@ -2,12 +2,12 @@
 FastAPI HTTP wrapper for qa-agent.
 
 Endpoints:
-  POST   /runs              — start a run; returns run_id immediately (202 Accepted)
-  GET    /runs/{run_id}     — poll run status
-  DELETE /runs/{run_id}     — cancel a running run
-  GET    /runs              — list runs (in-memory + disk)
-  GET    /runs/{run_id}/report  — return report.json
-  GET    /health            — liveness probe
+  POST /runs                     — create a run; returns run_id immediately (202 Accepted)
+  GET  /runs                     — list all runs (in-memory + disk)
+  GET  /runs/{run_id}            — poll run status
+  POST /runs/{run_id}/cancel     — cancel a pending/running run (202; 409 if already terminal)
+  GET  /runs/{run_id}/report     — return report.json
+  GET  /health                   — liveness probe
 
 Runs execute as asyncio tasks in the background; status is persisted to
 run_dir/run_status.json so GET /runs/{run_id} survives server restarts.
@@ -213,20 +213,28 @@ async def get_run(run_id: str, output: str = "reports") -> RunStatus:
     raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
 
-@app.delete("/runs/{run_id}", response_model=RunStatus)
+@app.post("/runs/{run_id}/cancel", response_model=RunStatus, status_code=202)
 async def cancel_run(run_id: str, output: str = "reports") -> RunStatus:
-    """Cancel a pending or running run. No-op if already done/failed/cancelled."""
+    """Cancel a pending or running run.
+
+    Returns 202 Accepted when cancellation is requested (async — task stops at the
+    next await point, between scenarios). Returns 409 Conflict if the run is already
+    in a terminal state (done/failed/cancelled).
+    """
     task = _tasks.get(run_id)
     state = _runs.get(run_id)
 
     if state is None:
         status_file = Path(output) / f"run-{run_id}" / "run_status.json"
-        if status_file.exists():
-            return RunStatus(**json.loads(status_file.read_text()))
-        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        if not status_file.exists():
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        state = json.loads(status_file.read_text())
 
     if state["status"] in ("done", "failed", "cancelled"):
-        return RunStatus(**state)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run '{run_id}' is already {state['status']} — cannot cancel",
+        )
 
     if task and not task.done():
         task.cancel()

@@ -1,40 +1,40 @@
-# fly.toml — Fly.io deployment config for qa-agent (format v2)
-# Update `app` to match your Fly app name from the dashboard.
+# fly.toml app configuration file generated for qa-agent-sp on 2026-05-13T13:34:37Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "qa-agent-sp"
-primary_region = "arn"  # Stockholm — closest to Romania; change if needed
+app = 'qa-agent-sp'
+primary_region = 'arn'
 
 [build]
 
 [env]
-  PORT = "8080"
-  QA_BROWSER = "browserbase"  # cloud default; local dev uses local Playwright
+  PORT = '8080'
+  QA_BROWSER = 'browserbase'
 
-# Reports + SQLite state store live on a persistent volume.
-# Single-machine only — multi-instance needs Postgres + R2 (Phase 2 Step 5).
 [[mounts]]
-  source      = "qa_agent_reports"
-  destination = "/app/reports"
+  source = 'qa_agent_reports'
+  destination = '/app/reports'
 
 [http_service]
   internal_port = 8080
-  force_https   = true
-  auto_stop_machines  = "stop"
+  force_https = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
 
   [http_service.concurrency]
-    type       = "requests"
+    type = 'requests'
     hard_limit = 10
     soft_limit = 5
 
   [[http_service.checks]]
-    interval     = "15s"
-    timeout      = "5s"
-    grace_period = "30s"
-    method       = "GET"
-    path         = "/health"
+    interval = '15s'
+    timeout = '5s'
+    grace_period = '30s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  size   = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'

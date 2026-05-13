@@ -38,4 +38,4 @@ primary_region = "arn"  # Stockholm — closest to Romania; change if needed
 
 [[vm]]
   size   = "shared-cpu-1x"
-  memory = "512mb"
+  memory = "1gb"

@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from qa_agent.agent import _make_server_params
-from qa_agent.llm import LLMConfig, complete, ensure_provider_running
+from qa_agent.llm import LLMConfig, complete, ensure_provider_running, estimate_cost
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 MAX_TURNS = 50  # Analyst needs more turns to crawl a full site
@@ -155,6 +155,7 @@ async def run_analysis(
 
     written_files: dict[str, str] = {}
     finished: dict | None = None
+    usage: dict = {}
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -185,7 +186,7 @@ async def run_analysis(
 
             for turn in range(MAX_TURNS):
                 try:
-                    response = complete(config, messages, tools=all_tools, max_tokens=4096)
+                    response = complete(config, messages, tools=all_tools, max_tokens=4096, _usage=usage)
                 except Exception as e:
                     console.print(f"[red]LLM error on turn {turn}: {e}[/red]")
                     break
@@ -271,11 +272,29 @@ async def run_analysis(
     duration = round(time.monotonic() - start, 1)
     summary = finished.get("summary", "incomplete") if finished else "incomplete — finish_analysis not called"
 
+    cost = estimate_cost(config.resolved_model(), usage)
+    if cost is not None:
+        usage["cost_usd"] = round(cost, 6)
+
+    telemetry = {
+        "role": "analyst",
+        "url": url,
+        "provider": config.provider,
+        "model": config.resolved_model(),
+        "duration_s": duration,
+        "files_written": len(written_files),
+        "tokens": usage,
+    }
+    (output_dir / "analyst_telemetry.json").write_text(
+        json.dumps(telemetry, indent=2), encoding="utf-8"
+    )
+
     console.print()
     console.print(Panel(
         f"[bold]Files written:[/bold] {len(written_files)}\n"
         f"[bold]Duration:[/bold]     {duration}s\n"
-        f"[bold]Summary:[/bold]      {summary}",
+        + (f"[bold]Cost:[/bold]         ${cost:.4f}\n" if cost is not None else "")
+        + f"[bold]Summary:[/bold]      {summary}",
         title=(
             "[green]Analysis complete[/green]"
             if finished else
@@ -295,6 +314,8 @@ async def run_analysis(
         "provider": config.provider,
         "model": config.resolved_model(),
         "scoped_pages": pages,
+        "tokens": usage,
+        "cost_usd": cost,
     }
 
 

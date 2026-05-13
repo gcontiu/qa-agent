@@ -22,6 +22,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from qa_agent.agent import _make_server_params
+from qa_agent import browserbase
 from qa_agent.llm import LLMConfig, complete, ensure_provider_running, estimate_cost
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -151,7 +152,14 @@ async def run_analysis(
     scope_note = f"  │  Pages: {len(pages)} scoped" if pages else ""
     console.print(f"[dim]Prefix: {spec_prefix}  │  Output: {output_dir}{scope_note}[/dim]\n")
 
-    server_params = _make_server_params()
+    bb_session_id: str | None = None
+    cdp_endpoint: str | None = None
+    if browserbase.is_configured():
+        console.print("[dim]Browserbase: creating analyst session...[/dim]")
+        bb_session_id, cdp_endpoint = browserbase.create_session()
+        console.print(f"[green]✓[/green] Browserbase session {bb_session_id}")
+
+    server_params = _make_server_params(cdp_endpoint)
 
     written_files: dict[str, str] = {}
     finished: dict | None = None
@@ -264,6 +272,9 @@ async def run_analysis(
 
                 if finished:
                     break
+
+    if bb_session_id:
+        browserbase.delete_session(bb_session_id)
 
     console.print()
     for filename in written_files:

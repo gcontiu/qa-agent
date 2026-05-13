@@ -542,12 +542,12 @@ def _make_server_params(cdp_endpoint: str | None = None) -> StdioServerParameter
     if cdp_endpoint:
         return StdioServerParameters(
             command="npx",
-            args=["@playwright/mcp@latest", f"--cdp-endpoint={cdp_endpoint}"],
+            args=["@playwright/mcp", f"--cdp-endpoint={cdp_endpoint}"],
         )
     browser = os.getenv("QA_BROWSER", "chromium")
     return StdioServerParameters(
         command="npx",
-        args=["@playwright/mcp@latest", "--headless", "--isolated", f"--browser={browser}"],
+        args=["@playwright/mcp", "--headless", "--isolated", f"--browser={browser}"],
     )
 
 

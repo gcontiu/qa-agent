@@ -20,7 +20,7 @@ RUN uv sync --no-dev --no-install-project \
     --allow-insecure-host files.pythonhosted.org
 
 # Pre-install @playwright/mcp globally so npx finds it without a network fetch.
-RUN npm install -g @playwright/mcp
+RUN npm install -g @playwright/mcp@0.0.75
 
 # Optional: install Chromium for local Docker testing (without Browserbase).
 # Fly.io deploy uses Browserbase (QA_BROWSER=browserbase in fly.toml).

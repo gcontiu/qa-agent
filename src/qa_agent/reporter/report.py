@@ -104,7 +104,10 @@ def write_run(
       telemetry.json — token/action counts
     Returns the run directory Path.
     """
-    run_id = run_id or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    if run_id is None:
+        slug = Path(spec_bundle.source_dir).name.lower()
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        run_id = f"{slug}-{timestamp}"
     run_dir = output_dir / f"run-{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "evidence").mkdir(exist_ok=True)

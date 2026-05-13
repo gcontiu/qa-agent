@@ -200,7 +200,8 @@ def _write_status_file(output_dir: Path, run_id: str, state: dict) -> None:
 @app.post("/runs", response_model=RunStatus, status_code=202)
 async def create_run(req: RunRequest) -> RunStatus:
     """Start a QA run. Returns immediately with run_id; poll GET /runs/{run_id} for status."""
-    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    slug = Path(req.spec_dir).name.lower()
+    run_id = f"{slug}-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}"
     output_dir = Path(req.output)
 
     state: dict = {

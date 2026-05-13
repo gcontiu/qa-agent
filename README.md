@@ -153,7 +153,7 @@ uv run qa-agent analyze https://www.alconind.ro \
 ### Anthropic
 
 ```bash
-# Default — full suite, Sonnet (Pro/Starter tier)
+# Default — full suite, Sonnet
 uv run qa-agent run specs/alconind --output reports/alconind-full
 
 # Haiku — Free tier config (~$0.056/run)

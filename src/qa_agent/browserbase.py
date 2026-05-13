@@ -10,7 +10,7 @@ Required env vars:
   QA_BROWSERBASE_PROJECT_ID  — Browserbase project ID
 
 Optional:
-  QA_BROWSERBASE_REGION      — cloud region (default: us-east-1)
+  QA_BROWSERBASE_REGION      — cloud region (default: let Browserbase choose)
   QA_BROWSERBASE_TIMEOUT     — session timeout in seconds (default: 300)
 """
 import json
@@ -19,7 +19,6 @@ import urllib.error
 import urllib.request
 
 _API_BASE = "https://api.browserbase.com/v1"
-_CONNECT_BASE = "wss://connect.browserbase.com"
 
 
 def is_configured() -> bool:
@@ -35,14 +34,14 @@ def create_session() -> tuple[str, str]:
     """
     api_key = os.environ["QA_BROWSERBASE_API_KEY"]
     project_id = os.environ["QA_BROWSERBASE_PROJECT_ID"]
-    region = os.getenv("QA_BROWSERBASE_REGION", "us-east-1")
     timeout = int(os.getenv("QA_BROWSERBASE_TIMEOUT", "300"))
 
-    payload = json.dumps({
-        "projectId": project_id,
-        "region": region,
-        "timeout": timeout,
-    }).encode()
+    body: dict = {"projectId": project_id, "timeout": timeout}
+    region = os.getenv("QA_BROWSERBASE_REGION", "").strip()
+    if region:
+        body["region"] = region
+
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(
         f"{_API_BASE}/sessions",
         data=payload,
@@ -56,13 +55,15 @@ def create_session() -> tuple[str, str]:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        raise RuntimeError(f"Browserbase session creation failed ({e.code}): {body}") from e
+        body_text = e.read().decode(errors="replace")
+        raise RuntimeError(f"Browserbase session creation failed ({e.code}): {body_text}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"Browserbase API unreachable: {e.reason}") from e
 
     session_id = data["id"]
-    cdp_url = f"{_CONNECT_BASE}?apiKey={api_key}&sessionId={session_id}"
+    # Use the connectUrl returned by the API — it is region-specific and
+    # contains a signed token. Never construct this URL manually.
+    cdp_url = data["connectUrl"]
     return session_id, cdp_url
 
 

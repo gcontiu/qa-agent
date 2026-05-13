@@ -236,6 +236,40 @@ Cloud deployments where local browser management is infeasible. The roadmap (D6)
 
 ---
 
+## Known Limitations — Free Tiers (Fly.io + Browserbase)
+
+Empirically validated 2026-05-13. Applies to the current MVP deployment (`qa-agent-sp` on Fly.io hobby plan + Browserbase free tier).
+
+### Fly.io (hobby / shared-cpu-1x, 2GB)
+
+| Limitation | Detail | Trigger / Workaround |
+|---|---|---|
+| **OOM under concurrent load** | uvicorn (~250MB) + asyncio BackgroundTask (~200MB) + npx Node.js process (~200MB) = ~650MB under active run. 512MB and 1GB both OOM'd in testing. | Fixed at 2GB (`fly.toml`). If OOM recurs: separate worker process (Step 5). |
+| **BackgroundTasks killed on restart** | Fly restarts the machine on deploy or health-check failure. All in-flight `asyncio.BackgroundTask` runs are killed; they appear as "Interrupted by server restart" in status. | `min_machines_running=1` prevents auto-stop. Proper fix: job queue (Step 5). |
+| **Specs lost on redeploy** | Specs written to container filesystem (e.g. `specs/emag/`) are wiped on each deploy. Only `/app/reports/` is on the persistent volume. | Always use `-o reports/specs/<name>` in `qa-agent analyze`, and `spec_dir: "reports/specs/<name>"` in API calls. |
+| **Single machine = no horizontal scale** | Volume is mounted on one machine only. A second instance would have a separate volume and split in-memory `_runs` dict. | Acceptable for MVP. Fix: Postgres + R2 (Step 5). |
+| **Region latency** | Machine in `iad` (US East); Browserbase auto-assigns sessions (observed: `us-west-2`). Cross-region WebSocket adds ~30–80ms per browser tool call. | Acceptable for correctness testing. Optimise after launch. |
+
+### Browserbase (free tier)
+
+| Limitation | Detail | Trigger / Workaround |
+|---|---|---|
+| **Rate-based anti-bot detection** | Sites with Cloudflare or similar protection block requests after 6–7 consecutive Browserbase sessions in a short window. Observed on emag.ro (first 6 sessions succeed, subsequent ones receive human-verification challenge). | `QA_SCENARIO_DELAY=3` (default in API) adds 3s between sessions. Proper fix: Browserbase Stealth Mode (paid tier) — see `docs/roadmap.md` deferred items. |
+| **Session region auto-assigned** | Free tier assigns sessions to any available region (observed: `us-west-2` even when not requested). `connectUrl` in API response is the authoritative endpoint; constructing the URL manually fails. | Always use `data["connectUrl"]` from the session creation response (implemented in `browserbase.py`). |
+| **No stealth mode** | Free tier does not support `proxies: true` or fingerprint randomization. Aggressive anti-bot systems detect cloud browser fingerprint even with delays. | Document limitation to users in UI. Upgrade to paid Stealth Mode when first user reports consistent blocks. |
+| **Session cost unvalidated** | $0.50/run estimate in cost model is untested. Actual cost depends on session duration and Browserbase plan. | Measure once first paid plan is activated. |
+| **Session timeout** | Default 300s. Long analyst runs or slow sites may exhaust the timeout mid-crawl. | Configurable via `QA_BROWSERBASE_TIMEOUT`. Analyst on a 1-page scope completes in <60s typically. |
+
+### Summary — what works reliably on free tiers
+
+- Analyst on standard marketing pages (no aggressive anti-bot): ✓
+- Executor with `max_scenarios ≤ 5` and `QA_SCENARIO_DELAY=3`: ✓ on most sites
+- HTTP API + polling pattern: ✓
+- Persistent reports and specs (when stored under `reports/`): ✓
+- Sites with Cloudflare Enterprise or strict bot protection: ⚠ unreliable beyond 6 sessions
+
+---
+
 ## Spec Format
 
 Dual format support:

@@ -572,6 +572,12 @@ async def preflight_check() -> None:
     # Steps 2 + 3 — single MCP session
     browser = os.getenv("QA_BROWSER", "chromium")
 
+    if browser == "browserbase" and not browserbase.is_configured():
+        raise RuntimeError(
+            "QA_BROWSER=browserbase is set but QA_BROWSERBASE_API_KEY / "
+            "QA_BROWSERBASE_PROJECT_ID are missing. Set them or unset QA_BROWSER."
+        )
+
     # Browserbase: create a cloud session if configured
     bb_session_id: str | None = None
     cdp_endpoint: str | None = None

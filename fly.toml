@@ -8,7 +8,8 @@ primary_region = "arn"  # Stockholm — closest to Romania; change if needed
 
 [env]
   PORT = "8080"
-  QA_BROWSER = "browserbase"  # cloud default; local dev uses local Playwright
+  # QA_BROWSER is not set here — Browserbase activates automatically when
+  # QA_BROWSERBASE_API_KEY + QA_BROWSERBASE_PROJECT_ID secrets are present.
 
 # Reports + SQLite state store live on a persistent volume.
 # Single-machine only — multi-instance needs Postgres + R2 (Phase 2 Step 5).

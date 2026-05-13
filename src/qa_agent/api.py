@@ -2,11 +2,12 @@
 FastAPI HTTP wrapper for qa-agent.
 
 Endpoints:
-  POST /runs              — start a run; returns run_id immediately (202 Accepted)
-  GET  /runs/{run_id}     — poll run status
-  GET  /runs              — list runs (in-memory + disk)
-  GET  /runs/{run_id}/report  — return report.json
-  GET  /health            — liveness probe
+  POST   /runs              — start a run; returns run_id immediately (202 Accepted)
+  GET    /runs/{run_id}     — poll run status
+  DELETE /runs/{run_id}     — cancel a running run
+  GET    /runs              — list runs (in-memory + disk)
+  GET    /runs/{run_id}/report  — return report.json
+  GET    /health            — liveness probe
 
 Runs execute as asyncio tasks in the background; status is persisted to
 run_dir/run_status.json so GET /runs/{run_id} survives server restarts.
@@ -37,6 +38,9 @@ _STATE_DB = Path("reports/.state/runs.db")
 # Also persisted to run_dir/run_status.json for restartability.
 _runs: dict[str, dict] = {}
 
+# Task registry: run_id → asyncio.Task (for cancellation).
+_tasks: dict[str, asyncio.Task] = {}
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
@@ -60,7 +64,7 @@ class RunSummary(BaseModel):
 
 class RunStatus(BaseModel):
     run_id: str
-    status: Literal["pending", "running", "done", "failed"]
+    status: Literal["pending", "running", "done", "failed", "cancelled"]
     spec_dir: str
     started_at: str | None = None
     completed_at: str | None = None
@@ -114,6 +118,14 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
                 req_item.to_executor_dict(), url, llm, context=bundle.config.context
             )
             results.append(result)
+    except asyncio.CancelledError:
+        state.update({
+            "status": "cancelled",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "error": f"Cancelled after {len(results)} of {len(requirements)} scenarios",
+        })
+        _write_status_file(output_dir, run_id, state)
+        raise
     except Exception as e:
         _mark_failed(run_id, state, output_dir, f"Execution error: {e}")
         return
@@ -183,7 +195,8 @@ async def create_run(req: RunRequest) -> RunStatus:
     _runs[run_id] = state
     _write_status_file(output_dir, run_id, state)
 
-    asyncio.create_task(_execute_job(run_id, req, output_dir))
+    task = asyncio.create_task(_execute_job(run_id, req, output_dir))
+    _tasks[run_id] = task
     return RunStatus(**state)
 
 
@@ -198,6 +211,27 @@ async def get_run(run_id: str, output: str = "reports") -> RunStatus:
         return RunStatus(**json.loads(status_file.read_text()))
 
     raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+
+@app.delete("/runs/{run_id}", response_model=RunStatus)
+async def cancel_run(run_id: str, output: str = "reports") -> RunStatus:
+    """Cancel a pending or running run. No-op if already done/failed/cancelled."""
+    task = _tasks.get(run_id)
+    state = _runs.get(run_id)
+
+    if state is None:
+        status_file = Path(output) / f"run-{run_id}" / "run_status.json"
+        if status_file.exists():
+            return RunStatus(**json.loads(status_file.read_text()))
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+    if state["status"] in ("done", "failed", "cancelled"):
+        return RunStatus(**state)
+
+    if task and not task.done():
+        task.cancel()
+
+    return RunStatus(**state)
 
 
 @app.get("/runs", response_model=list[RunStatus])

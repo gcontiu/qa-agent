@@ -281,5 +281,22 @@ def show_report(
     console.print(target.read_text())
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
+    port: int = typer.Option(8000, "--port", help="Bind port"),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)"),
+):
+    """Start the qa-agent HTTP API server."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]uvicorn not installed.[/red] Run: uv add uvicorn")
+        raise typer.Exit(2)
+
+    console.print(f"[bold]qa-agent API[/bold]  [dim]http://{host}:{port}[/dim]")
+    uvicorn.run("qa_agent.api:app", host=host, port=port, reload=reload)
+
+
 if __name__ == "__main__":
     app()

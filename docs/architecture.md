@@ -209,6 +209,31 @@ Playwright MCP (`@playwright/mcp`) runs as a subprocess, spawned fresh per test 
 
 **Preflight check:** before running any scenarios, verifies npx is available, MCP starts correctly, all essential tools are present, and the browser can actually navigate (`browser_navigate("https://playwright.dev")`).
 
+#### Browserbase Cloud Browser (Phase 1 — optional)
+
+Browserbase provides a cloud alternative to local Playwright. When configured via `QA_BROWSERBASE_API_KEY` and `QA_BROWSERBASE_PROJECT_ID` env vars, qa-agent creates a remote browser session and connects Playwright MCP via CDP endpoint instead of launching a local headless browser.
+
+**Session lifecycle:**
+- Before scenario: `browserbase.create_session()` → POST to Browserbase API, get `(session_id, cdp_url)`
+- `_make_server_params(cdp_endpoint)` routes @playwright/mcp to `--cdp-endpoint=<wss://...>` instead of `--headless --isolated`
+- After scenario: `browserbase.delete_session(session_id)` → best-effort DELETE (swallows errors so test results never lost)
+
+**Configuration:**
+```
+QA_BROWSERBASE_API_KEY       — required; Browserbase API key
+QA_BROWSERBASE_PROJECT_ID    — required; Browserbase project ID
+QA_BROWSERBASE_REGION        — default: us-east-1
+QA_BROWSERBASE_TIMEOUT       — session timeout in seconds, default 300
+```
+
+**Telemetry:**
+Each scenario result includes:
+- `browser`: "browserbase" (if CDP endpoint used) or "local"
+- `bb_session_duration_s`: browser-only time in seconds (for cost metering: $0.50/run estimate assumes 10 min/run average)
+
+**Use case:**
+Cloud deployments where local browser management is infeasible. The roadmap (D6) treats Browserbase as the primary Phase 1 test; if cost or latency is unacceptable, fall back to self-hosted Playwright on Modal/Fly.io.
+
 ---
 
 ## Spec Format

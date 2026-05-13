@@ -73,6 +73,17 @@ Per-model LLM timeout defaults (Ollama):
 | `qwen2.5:32b` | 150s |
 | _(all others)_ | 120s |
 
+### Browserbase (cloud browser)
+
+| Variable | Default | Description |
+|---|---|---|
+| `QA_BROWSERBASE_API_KEY` | _(required for Browserbase)_ | Browserbase API key |
+| `QA_BROWSERBASE_PROJECT_ID` | _(required for Browserbase)_ | Browserbase project ID |
+| `QA_BROWSERBASE_REGION` | `us-east-1` | Cloud region for browser session |
+| `QA_BROWSERBASE_TIMEOUT` | `300` | Session timeout in seconds before auto-expiry |
+
+Browserbase provides an alternative to local browser management for cloud deployments. The Phase 1 roadmap includes cost/latency validation to decide between Browserbase vs self-hosted Playwright on Modal/Fly.io.
+
 ### Analyst behaviour
 
 | Flag / Variable | Default | Description |
@@ -187,4 +198,17 @@ QA_FORCE_SLIM=true \
 QA_BOOTSTRAP_DEPTH=4 \
 QA_VERBOSE_LLM=true \
 uv run qa-agent run specs/alconind-smoke
+```
+
+### Browserbase integration (Phase 1 cloud-readiness)
+
+```bash
+# Run with Browserbase cloud browser instead of local Chromium
+QA_BROWSERBASE_API_KEY=<key> \
+QA_BROWSERBASE_PROJECT_ID=<project-id> \
+uv run qa-agent run specs/alconind --output reports/alconind-browserbase
+
+# Check telemetry for cost: look for "browser" field ("browserbase" | "local") 
+# and "bb_session_duration_s" in results/[].browser_metadata
+cat reports/alconind-browserbase/telemetry.json
 ```

@@ -95,6 +95,7 @@ def write_run(
     url: str,
     output_dir: Path,
     env: str | None = None,
+    run_id: str | None = None,
 ) -> Path:
     """
     Write the full run artefacts to output_dir:
@@ -103,7 +104,7 @@ def write_run(
       telemetry.json — token/action counts
     Returns the run directory Path.
     """
-    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    run_id = run_id or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     run_dir = output_dir / f"run-{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "evidence").mkdir(exist_ok=True)

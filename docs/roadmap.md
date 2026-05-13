@@ -103,7 +103,7 @@ The key strategic insight: **don't self-host LLMs**. Inference APIs (Anthropic; 
 | Frontend Next.js scaffold (Vercel) | Landing page + dashboard layout |
 | User auth: Clerk or Supabase Auth | Email/password + Google OAuth for users (not for target products) |
 | "Add product" flow | URL + description; analyst runs in background |
-| Spec viewer/editor (Monaco or CodeMirror) | View analyst-generated specs, edit Gherkin inline, approve before run |
+| Spec viewer/editor (Monaco or CodeMirror) | View analyst-generated specs, edit Gherkin inline, approve before run. **UI must surface limitations:** (1) anti-bot blocks — show warning when analyst couldn't access the page ("Site-ul blochează crawling-ul automat; activează Stealth Mode sau verifică manual specs-urile"); (2) scenario cap — show how many scenarios were capped vs total discovered; (3) Browserbase session cost per run. |
 | Run trigger + status page | Trigger run, show live progress, display report when done |
 | Cost meter in UI | Display per-run cost from `telemetry.json`; show scenario cap usage |
 | Job queue (Inngest or Trigger.dev) | Async run execution; users don't wait for HTTP response |
@@ -146,6 +146,7 @@ Each item is deferred against a specific trigger. When the trigger fires, move i
 | **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue |
 | **Auth into *target products*** (form login, OAuth, 2FA, KMS vault — Phase 3) | ≥ 30% of beta users request testing of authenticated pages; or first paying customer makes it a deal-breaker |
 | **Retry logic + flaky-test badging** (Phase 4) | False-fail rate in production > 5%, measured over ≥ 100 runs |
+| **Browserbase Stealth Mode** (`proxies: true` + fingerprint) | First user reports consistent anti-bot blocks (Cloudflare, reCAPTCHA) preventing analyst/executor from accessing their site; or >10% of runs fail due to challenges. Current mitigation: `QA_SCENARIO_DELAY=3` between sessions reduces rate-based detection. |
 | **Self-hosted Playwright on Modal** | Browserbase spend > $1k/month |
 | **Multi-region deploy (EU)** | First EU customer with data residency requirement, or > 20% of users from EU |
 | **SAML SSO / SCIM / SOC2** (Phase 5) | First enterprise prospect blocks deal on it; until then, $0 spent |

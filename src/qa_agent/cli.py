@@ -36,8 +36,11 @@ def _scenario_cap() -> int | None:
 async def _execute_requirements(
     requirements, url: str, llm: LLMConfig, context: str = ""
 ) -> list[dict]:
+    scenario_delay = int(os.environ.get("QA_SCENARIO_DELAY", "0"))  # default off for local
     results = []
-    for req in requirements:
+    for i, req in enumerate(requirements):
+        if i > 0 and scenario_delay > 0:
+            await asyncio.sleep(scenario_delay)
         result = await run_requirement(req.to_executor_dict(), url, llm, context=context)
         results.append(result)
         console.print()

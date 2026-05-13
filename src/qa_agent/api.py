@@ -141,9 +141,13 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
         _mark_failed(run_id, state, output_dir, f"Preflight failed: {e}")
         return
 
+    scenario_delay = int(os.environ.get("QA_SCENARIO_DELAY", "3"))
+
     results: list[dict] = []
     try:
-        for req_item in requirements:
+        for i, req_item in enumerate(requirements):
+            if i > 0 and scenario_delay > 0:
+                await asyncio.sleep(scenario_delay)
             result = await run_requirement(
                 req_item.to_executor_dict(), url, llm, context=bundle.config.context
             )

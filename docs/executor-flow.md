@@ -114,6 +114,14 @@ flowchart TD
 
 ---
 
+## Inter-scenario delay (`QA_SCENARIO_DELAY`)
+
+Between consecutive `run_requirement` calls, `api.py` inserts `asyncio.sleep(QA_SCENARIO_DELAY)` (default **3s** in cloud, **0s** in CLI). Each scenario opens a new Browserbase session; without a delay, rapid session creation from the same IP pool triggers anti-bot detection (observed: Cloudflare challenges after 6–7 sessions on emag.ro).
+
+The delay applies only between scenarios, not before the first one. See `docs/timeout-strategy.md` for configuration details.
+
+---
+
 ## Why tests with `When` take longer
 
 Requirements with a `When` clause (e.g. *"click the PLAY button"*) need the model to:

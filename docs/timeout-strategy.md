@@ -119,6 +119,25 @@ QA_RATE_LIMIT_WAIT=30     # shorter wait (if you know your quota resets faster)
 
 **Interaction with test timeout:** The wait counts toward `QA_TEST_TIMEOUT`. A 60s retry wait on a scenario with a 180s test timeout will exhaust most of the budget. If running suites against rate-limited APIs, set `QA_TEST_TIMEOUT` generously or disable it (`QA_TEST_TIMEOUT=0`).
 
+### Inter-Scenario Delay (`QA_SCENARIO_DELAY`)
+
+**What it does:** Inserts an `asyncio.sleep()` pause *between* scenario executions — after one scenario completes and before the next Browserbase session is created.
+
+**Why needed:** Anti-bot systems (Cloudflare, reCAPTCHA) detect repeated automated sessions from the same IP pool. Empirically observed on emag.ro: the first 6–7 consecutive Browserbase sessions succeed; subsequent ones trigger human-verification challenges. A short delay between sessions lowers the request frequency below the detection threshold.
+
+**Defaults:**
+- **API / cloud (`api.py`):** 3 seconds — always on, since cloud runs use Browserbase
+- **CLI (`cli.py`):** 0 seconds — off by default for local Playwright runs (no anti-bot concern)
+
+**Configuration:**
+```bash
+QA_SCENARIO_DELAY=5   # 5s between scenarios (aggressive anti-bot sites)
+QA_SCENARIO_DELAY=0   # disable (local Playwright or trusted environments)
+QA_SCENARIO_DELAY=3   # default in cloud API
+```
+
+**Interaction with run duration:** Adds `(N-1) × delay` seconds to total run time. For 20 scenarios with 3s delay: +57s overhead. Acceptable for cloud runs; disable for local speed.
+
 **Example output:**
 ```
 [qa-agent] RateLimitError — waiting 60s before retry 1/2 (anthropic/claude-sonnet-4-6)...

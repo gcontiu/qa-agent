@@ -16,6 +16,7 @@ Local development (SUPABASE_JWT_SECRET not set):
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass
 
 import jwt  # pyjwt
@@ -86,6 +87,15 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token missing sub claim",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token sub claim is not a valid UUID",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

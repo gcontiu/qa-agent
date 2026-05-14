@@ -23,23 +23,35 @@ async def create(name: str, url: str, description: str | None = None, user_id: s
     return str(row["id"])
 
 
-async def get(product_id: str) -> dict | None:
+async def get(product_id: str, user_id: str | None = None) -> dict | None:
     pool = get_pool()
     if not pool:
         return None
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM products WHERE id = $1::uuid", product_id
-        )
+        if user_id:
+            row = await conn.fetchrow(
+                "SELECT * FROM products WHERE id = $1::uuid AND user_id = $2::uuid",
+                product_id, user_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                "SELECT * FROM products WHERE id = $1::uuid", product_id
+            )
     return _row_to_dict(row) if row else None
 
 
-async def list_all() -> list[dict]:
+async def list_all(user_id: str | None = None) -> list[dict]:
     pool = get_pool()
     if not pool:
         return []
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM products ORDER BY created_at DESC")
+        if user_id:
+            rows = await conn.fetch(
+                "SELECT * FROM products WHERE user_id = $1::uuid ORDER BY created_at DESC",
+                user_id,
+            )
+        else:
+            rows = await conn.fetch("SELECT * FROM products ORDER BY created_at DESC")
     return [_row_to_dict(r) for r in rows]
 
 

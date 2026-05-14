@@ -141,6 +141,7 @@ Each item is deferred against a specific trigger. When the trigger fires, move i
 | **Redis queue (Upstash, `arq`/`rq`)** | >5 concurrent jobs observed, or `BackgroundTasks` lose runs on deploy/restart in production |
 | **Separate worker machine** (Fly process group) | Web requests start timing out due to worker CPU; or worker crashes take down API |
 | **R2/S3 for report storage** | Average `report.json` + evidence > 1 MB, or users request public report sharing links |
+| **`.specs/` temp dir cleanup + volume reduction** | Before Phase 2 public launch. See note below. |
 | **Stripe billing + tiered plans** | Closed beta validates retention ≥ 30% week-2; until then, manual invoicing for paid users |
 | **Tiered scenario caps (Free/Starter/Pro)** | Stripe is live; before that, single hardcoded global cap |
 | **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue |
@@ -153,6 +154,18 @@ Each item is deferred against a specific trigger. When the trigger fires, move i
 | **UI polish: dark mode, mobile, animations** | Beta feedback explicitly cites UI as a blocker (not vague "looks rough") |
 | **Spec versioning & migration tooling** | First breaking change to Gherkin schema with existing user specs in production |
 | **`fix-agent` integration / downstream consumers** | qa-agent itself is stable and 2+ users have asked for it |
+
+**Note — `.specs/` temp dir + volume strategy (discussed 2026-05-14):**
+
+When a run is triggered with `product_id`, specs are materialized from Supabase to `reports/run-<id>/.specs/` so `load_spec(Path)` can read them. This temp dir is never deleted — it accumulates on the Fly.io persistent volume with every run.
+
+**Immediate fix (pre-Phase-2):** call `shutil.rmtree(temp_dir)` immediately after `load_spec()` returns — the data is in memory from that point on and the directory serves no further purpose.
+
+**Broader question:** with specs already in Supabase, is the Fly.io volume still needed? By layer:
+- `.specs/` temp dir — no, should not survive past `load_spec()`
+- `report.json` + `evidence/` (screenshots) — yes, until the R2/S3 trigger fires
+- `run_status.json` — redundant with `jobs` table in Postgres, but kept as a restart-recovery fallback for `GET /runs` when the in-memory `_runs` dict is empty; can be removed once `GET /runs` reads from DB
+- `runs.db` (SQLite) — still needed for flakiness tracking and `--only-failing`; no DB equivalent
 
 **Discipline rule:** if a deferred item is being discussed but its trigger has not fired, the answer is "not yet" — not "let's add it just in case". Premature scope is the failure mode for this kind of product.
 

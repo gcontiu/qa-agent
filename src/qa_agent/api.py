@@ -18,7 +18,7 @@ Endpoints:
   GET  /runs/{run_id}            — poll run status
   POST /runs/{run_id}/cancel     — cancel a pending/running run (202; 409 if already terminal)
   GET  /runs/{run_id}/report     — return report.json
-  GET  /health                   — liveness probe
+  GET  /health                   — liveness probe (no auth required)
 """
 from __future__ import annotations
 
@@ -29,11 +29,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import Depends, FastAPI, HTTPException, Body
 from pydantic import BaseModel
 
 from qa_agent.agent import preflight_check, run_requirement
 from qa_agent.analyst import run_analysis
+from qa_agent.auth import CurrentUser, get_current_user
 from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
 from qa_agent.specs import load_spec
@@ -134,6 +135,8 @@ class RunStatus(BaseModel):
     summary: RunSummary | None = None
     report_path: str | None = None
     error: str | None = None
+
+    model_config = {"extra": "ignore"}
 
 
 def _scenario_cap() -> int | None:
@@ -273,19 +276,35 @@ def _write_status_file(output_dir: Path, run_id: str, state: dict) -> None:
     (run_dir / "run_status.json").write_text(json.dumps(state, indent=2))
 
 
+def _assert_run_owner(state: dict, user: CurrentUser, run_id: str) -> None:
+    """Raise HTTP 404 if the run belongs to a different user.
+
+    Returns 404 (not 403) to avoid leaking existence of other users' runs.
+    Skips the check for legacy state files that pre-date auth (no user_id field).
+    """
+    owner = state.get("user_id")
+    if owner and owner != user.user_id:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @app.post("/runs", response_model=RunStatus, status_code=202)
-async def create_run(req: RunRequest) -> RunStatus:
+async def create_run(
+    req: RunRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> RunStatus:
     """Start a QA run. Returns immediately with run_id; poll GET /runs/{run_id} for status."""
     if not req.spec_dir and not req.product_id:
         raise HTTPException(status_code=422, detail="Either spec_dir or product_id must be provided")
 
     if req.product_id:
-        product = await db_products.get(req.product_id)
-        slug = product["name"].lower().replace(" ", "-") if product else "product"
+        product = await db_products.get(req.product_id, user_id=user.user_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"Product '{req.product_id}' not found")
+        slug = product["name"].lower().replace(" ", "-")
     else:
         slug = Path(req.spec_dir).name.lower()
     run_id = f"{slug}-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}"
@@ -297,10 +316,12 @@ async def create_run(req: RunRequest) -> RunStatus:
         "status": "pending",
         "spec_dir": spec_key,
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "user_id": user.user_id,
     }
     _runs[run_id] = state
     _write_status_file(output_dir, run_id, state)
     await db_jobs.create(run_id, spec_key,
+                         user_id=user.user_id,
                          executor_model=req.executor_model,
                          max_scenarios=req.max_scenarios)
 
@@ -310,20 +331,32 @@ async def create_run(req: RunRequest) -> RunStatus:
 
 
 @app.get("/runs/{run_id}", response_model=RunStatus)
-async def get_run(run_id: str, output: str = "reports") -> RunStatus:
+async def get_run(
+    run_id: str,
+    output: str = "reports",
+    user: CurrentUser = Depends(get_current_user),
+) -> RunStatus:
     """Poll run status. Falls back to disk for runs from previous server sessions."""
     if run_id in _runs:
-        return RunStatus(**_runs[run_id])
+        state = _runs[run_id]
+        _assert_run_owner(state, user, run_id)
+        return RunStatus(**state)
 
     status_file = Path(output) / f"run-{run_id}" / "run_status.json"
     if status_file.exists():
-        return RunStatus(**json.loads(status_file.read_text()))
+        state = json.loads(status_file.read_text())
+        _assert_run_owner(state, user, run_id)
+        return RunStatus(**state)
 
     raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
 
 @app.post("/runs/{run_id}/cancel", response_model=RunStatus, status_code=202)
-async def cancel_run(run_id: str, output: str = "reports") -> RunStatus:
+async def cancel_run(
+    run_id: str,
+    output: str = "reports",
+    user: CurrentUser = Depends(get_current_user),
+) -> RunStatus:
     """Cancel a pending or running run.
 
     Returns 202 Accepted when cancellation is requested (async — task stops at the
@@ -339,6 +372,8 @@ async def cancel_run(run_id: str, output: str = "reports") -> RunStatus:
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
         state = json.loads(status_file.read_text())
 
+    _assert_run_owner(state, user, run_id)
+
     if state["status"] in ("done", "failed", "cancelled"):
         raise HTTPException(
             status_code=409,
@@ -346,7 +381,6 @@ async def cancel_run(run_id: str, output: str = "reports") -> RunStatus:
         )
 
     if task is None or task.done():
-        # Status file says running but no live task — run was interrupted (server restart)
         raise HTTPException(
             status_code=409,
             detail=f"Run '{run_id}' has no active task — it was likely interrupted by a server restart",
@@ -357,14 +391,19 @@ async def cancel_run(run_id: str, output: str = "reports") -> RunStatus:
 
 
 @app.get("/runs", response_model=list[RunStatus])
-async def list_runs(output: str = "reports") -> list[RunStatus]:
-    """List all runs (in-memory + persisted on disk), newest first."""
+async def list_runs(
+    output: str = "reports",
+    user: CurrentUser = Depends(get_current_user),
+) -> list[RunStatus]:
+    """List all runs for the current user (in-memory + persisted on disk), newest first."""
     runs: list[RunStatus] = []
     seen: set[str] = set()
 
     for run_id, state in _runs.items():
-        runs.append(RunStatus(**state))
-        seen.add(run_id)
+        owner = state.get("user_id")
+        if owner is None or owner == user.user_id:
+            runs.append(RunStatus(**state))
+            seen.add(run_id)
 
     output_dir = Path(output)
     if output_dir.exists():
@@ -372,7 +411,10 @@ async def list_runs(output: str = "reports") -> list[RunStatus]:
             rid = status_file.parent.name.removeprefix("run-")
             if rid not in seen:
                 try:
-                    runs.append(RunStatus(**json.loads(status_file.read_text())))
+                    state = json.loads(status_file.read_text())
+                    owner = state.get("user_id")
+                    if owner is None or owner == user.user_id:
+                        runs.append(RunStatus(**state))
                 except Exception:
                     pass
 
@@ -380,8 +422,18 @@ async def list_runs(output: str = "reports") -> list[RunStatus]:
 
 
 @app.get("/runs/{run_id}/report")
-async def get_report(run_id: str, output: str = "reports") -> dict:
+async def get_report(
+    run_id: str,
+    output: str = "reports",
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
     """Return the report.json for a completed run."""
+    # Ownership check via run status file
+    status_file = Path(output) / f"run-{run_id}" / "run_status.json"
+    if status_file.exists():
+        state = json.loads(status_file.read_text())
+        _assert_run_owner(state, user, run_id)
+
     report_file = Path(output) / f"run-{run_id}" / "report.json"
     if not report_file.exists():
         raise HTTPException(status_code=404, detail=f"Report for run '{run_id}' not found")
@@ -393,20 +445,27 @@ async def get_report(run_id: str, output: str = "reports") -> dict:
 # ---------------------------------------------------------------------------
 
 @app.post("/products", status_code=201)
-async def create_product(req: ProductRequest) -> dict:
-    product_id = await db_products.create(req.name, req.url, req.description)
-    product = await db_products.get(product_id)
-    return product
+async def create_product(
+    req: ProductRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    product_id = await db_products.create(req.name, req.url, req.description, user_id=user.user_id)
+    return await db_products.get(product_id)
 
 
 @app.get("/products")
-async def list_products() -> list[dict]:
-    return await db_products.list_all()
+async def list_products(
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    return await db_products.list_all(user_id=user.user_id)
 
 
 @app.get("/products/{product_id}")
-async def get_product(product_id: str) -> dict:
-    product = await db_products.get(product_id)
+async def get_product(
+    product_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    product = await db_products.get(product_id, user_id=user.user_id)
     if not product:
         raise HTTPException(status_code=404, detail=f"Product '{product_id}' not found")
     return product
@@ -445,9 +504,13 @@ async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest)
 
 
 @app.post("/products/{product_id}/analyze", status_code=202)
-async def analyze_product(product_id: str, req: AnalyzeRequest) -> dict:
+async def analyze_product(
+    product_id: str,
+    req: AnalyzeRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
     """Trigger analyst for a product. Saves generated specs to DB. Poll with GET."""
-    product = await db_products.get(product_id)
+    product = await db_products.get(product_id, user_id=user.user_id)
     if not product:
         raise HTTPException(status_code=404, detail=f"Product '{product_id}' not found")
 
@@ -455,6 +518,7 @@ async def analyze_product(product_id: str, req: AnalyzeRequest) -> dict:
     state: dict = {
         "task_id": task_id,
         "product_id": product_id,
+        "user_id": user.user_id,
         "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -464,9 +528,16 @@ async def analyze_product(product_id: str, req: AnalyzeRequest) -> dict:
 
 
 @app.get("/products/{product_id}/analyze/{task_id}")
-async def get_analysis_task(product_id: str, task_id: str) -> dict:
+async def get_analysis_task(
+    product_id: str,
+    task_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
     state = _analyses.get(task_id)
     if not state or state.get("product_id") != product_id:
+        raise HTTPException(status_code=404, detail=f"Analysis task '{task_id}' not found")
+    owner = state.get("user_id")
+    if owner and owner != user.user_id:
         raise HTTPException(status_code=404, detail=f"Analysis task '{task_id}' not found")
     return state
 
@@ -475,13 +546,30 @@ async def get_analysis_task(product_id: str, task_id: str) -> dict:
 # Specs CRUD
 # ---------------------------------------------------------------------------
 
+async def _get_owned_product(product_id: str, user: CurrentUser) -> dict:
+    """Return product dict or raise 404. Implicitly enforces ownership."""
+    product = await db_products.get(product_id, user_id=user.user_id)
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product '{product_id}' not found")
+    return product
+
+
 @app.get("/products/{product_id}/specs")
-async def list_specs(product_id: str) -> list[dict]:
+async def list_specs(
+    product_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    await _get_owned_product(product_id, user)
     return await db_specs.list_by_product(product_id)
 
 
 @app.get("/products/{product_id}/specs/{filename:path}")
-async def get_spec(product_id: str, filename: str) -> dict:
+async def get_spec(
+    product_id: str,
+    filename: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    await _get_owned_product(product_id, user)
     spec = await db_specs.get_by_filename(product_id, filename)
     if not spec:
         raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")
@@ -489,20 +577,37 @@ async def get_spec(product_id: str, filename: str) -> dict:
 
 
 @app.put("/products/{product_id}/specs/{filename:path}", status_code=200)
-async def upsert_spec(product_id: str, filename: str, req: SpecUpdateRequest) -> dict:
+async def upsert_spec(
+    product_id: str,
+    filename: str,
+    req: SpecUpdateRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    await _get_owned_product(product_id, user)
     await db_specs.upsert(product_id, filename, req.content)
     return await db_specs.get_by_filename(product_id, filename)
 
 
 @app.delete("/products/{product_id}/specs/{filename:path}", status_code=204)
-async def delete_spec(product_id: str, filename: str) -> None:
+async def delete_spec(
+    product_id: str,
+    filename: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> None:
+    await _get_owned_product(product_id, user)
     deleted = await db_specs.delete(product_id, filename)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")
 
 
 @app.post("/products/{product_id}/specs/{filename:path}/approve")
-async def approve_spec(product_id: str, filename: str, req: ApproveRequest = Body(default=ApproveRequest())) -> dict:
+async def approve_spec(
+    product_id: str,
+    filename: str,
+    req: ApproveRequest = Body(default=ApproveRequest()),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    await _get_owned_product(product_id, user)
     updated = await db_specs.set_approved(product_id, filename, req.approved)
     if not updated:
         raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")

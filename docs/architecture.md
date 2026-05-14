@@ -338,6 +338,81 @@ Status is persisted to `run_dir/run_status.json` so it survives server restarts.
 
 ---
 
+## Authentication
+
+qa-agent is multi-tenant. Every product, spec, and job belongs to exactly one user, and the API enforces ownership on every request. Authentication is built on **Supabase Auth**; the design is structured to keep vendor lock-in bounded so the auth provider can be swapped (Clerk, Auth0, custom) in 1–2 days if needed.
+
+### Identity model
+
+| Layer | Owner | Purpose |
+|---|---|---|
+| `auth.users` (Supabase-managed schema) | Supabase | Source of truth for credentials, password hashes, OAuth provider links, session tokens. Not referenced directly from business tables. |
+| `public.users` (our schema) | qa-agent | Mirror keyed by the same UUID. All business-table foreign keys (`products.user_id`, `jobs.user_id`) reference this table. |
+| Sync trigger `on_auth_user_created` | Postgres trigger | When Supabase inserts into `auth.users`, the trigger inserts a matching row into `public.users` (`id`, `email`, `created_at`). |
+
+**Why the mirror exists (D1 = Option B):** business tables never depend on `auth.users` directly. If we migrate away from Supabase Auth, `public.users` stays intact — only the sync trigger and the JWT verification middleware need to change. Without the mirror, every business FK would point at a Supabase-specific table and a migration would require schema-level rewrites.
+
+### JWT verification (D2 = local)
+
+The frontend obtains a Supabase session and sends `Authorization: Bearer <access_token>` on every request. The FastAPI middleware decodes the JWT **locally** using the Supabase project's JWT secret (HS256), no network call to Supabase per request.
+
+```
+SUPABASE_JWT_SECRET   — project JWT secret (HS256). Set as Fly secret.
+SUPABASE_URL          — used only by frontend SDK; backend doesn't need it.
+```
+
+The middleware extracts `sub` (user UUID) and `email` from the JWT claims and exposes them as `current_user` via `Depends(get_current_user)`. Tokens are verified for signature, expiry, and audience (`authenticated`).
+
+**Why local:** ~50–100ms saved per request vs. calling `/auth/v1/user`. The trade-off — a revoked session remains valid until the access token expires (default 1h) — is acceptable for an MVP.
+
+### Multi-tenancy enforcement (D3 = both layers)
+
+Two independent layers, applied together:
+
+1. **Application-level filters** in `db/products.py`, `db/specs.py`, `db/jobs.py`. Every CRUD function takes `user_id` and includes it in `WHERE` clauses. First line of defense, easy to read and debug.
+2. **Row Level Security (RLS) in Postgres** on `products`, `specs`, `jobs`. Policies key off `auth.uid()` (Supabase's helper that reads the JWT claim from the connection). Defense-in-depth — even if the application accidentally omits a filter, RLS blocks cross-tenant reads/writes.
+
+Example policy:
+```sql
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_own_products" ON products
+  FOR ALL USING (user_id = auth.uid());
+```
+
+`auth.uid()` is the only Supabase-specific surface inside our SQL. On migration, it is replaced with `current_setting('app.user_id')::uuid` populated by the new auth middleware.
+
+### CLI and local development
+
+The CLI bypasses JWT verification by connecting to Postgres with the **service-role key** (`DATABASE_URL` configured for service role). Service-role connections automatically bypass RLS. This keeps the CLI usable for local dev and ops without requiring login flows.
+
+Never use the service-role key from the FastAPI server in production — the server connects with a constrained role and relies on RLS for isolation.
+
+### Vendor lock-in summary
+
+| Component | Lock-in | Migration cost |
+|---|---|---|
+| Postgres database | None | `pg_dump` → restore anywhere. |
+| `public.users` mirror | None | Owned by us; survives provider change. |
+| JWT middleware | Low | Swap the verification function (one file). |
+| RLS policies | Low | Replace `auth.uid()` with `current_setting('app.user_id')`. |
+| OAuth providers | Low | Re-register apps with the new provider; users re-login. |
+| Email flows (verify, reset, magic link) | Low | Config change to Resend/Postmark/SES. |
+| `auth.users` + sessions | Medium | Real migration cost. Mitigated by user-import APIs on Clerk/Auth0 and the mirror pattern above. |
+
+**Targeted migration to Clerk or Auth0:** estimated 1–2 days. **Targeted migration to fully self-hosted auth:** 1–2 weeks (rewrite signup/login/reset, password hashing, email sender).
+
+### Open features not covered
+
+| Feature | Status |
+|---|---|
+| SAML SSO | Supabase Pro tier; deferred to Phase 5 |
+| SCIM provisioning | Supabase Enterprise tier; Phase 5 |
+| TOTP 2FA | Built into Supabase Auth; enable in dashboard if needed |
+| Audit log of credential access | Phase 4 (deferred) |
+| BYOK per tenant for LLM keys | Phase 4 (deferred) |
+
+---
+
 ## Output Contract
 
 Per-run artifacts under `reports/run-<ISO-timestamp>/`:

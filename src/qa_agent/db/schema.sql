@@ -6,14 +6,37 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ---------------------------------------------------------------------------
--- users
--- Stub for now — populated by Clerk/Supabase Auth in Step 6.
+-- users (public mirror of auth.users — D1=Option B)
+-- IDs come from auth.users via the on_auth_user_created trigger (no default).
+-- Business-table FKs point here, not at auth.users directly, so migrating
+-- away from Supabase Auth only requires swapping the trigger + JWT middleware.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
-    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          UUID        PRIMARY KEY,          -- set by trigger from auth.users.id
     email       TEXT        UNIQUE NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Sync trigger: new auth.users row → public.users row
+-- SECURITY DEFINER required: supabase_auth_admin owns auth.users but lacks
+-- INSERT on public.users; running as function owner grants the privilege.
+CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.users (id, email, created_at)
+    VALUES (NEW.id, NEW.email, NEW.created_at)
+    ON CONFLICT (id) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_auth_user();
 
 -- ---------------------------------------------------------------------------
 -- products
@@ -88,3 +111,28 @@ DROP TRIGGER IF EXISTS specs_updated_at ON specs;
 CREATE TRIGGER specs_updated_at
     BEFORE UPDATE ON specs
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security (D3=both layers)
+-- auth.uid() is the only Supabase-specific surface; replace with
+-- current_setting('app.user_id')::uuid when migrating away from Supabase Auth.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users_own_products" ON products;
+CREATE POLICY "users_own_products" ON products
+    FOR ALL USING (user_id = auth.uid());
+
+ALTER TABLE specs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users_own_specs" ON specs;
+CREATE POLICY "users_own_specs" ON specs
+    FOR ALL USING (
+        product_id IN (
+            SELECT id FROM products WHERE user_id = auth.uid()
+        )
+    );
+
+ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users_own_jobs" ON jobs;
+CREATE POLICY "users_own_jobs" ON jobs
+    FOR ALL USING (user_id = auth.uid());

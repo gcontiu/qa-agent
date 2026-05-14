@@ -20,12 +20,13 @@ async def create(run_id: str, spec_dir: str, **kwargs: Any) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO jobs (id, spec_dir, status, started_at,
+            INSERT INTO jobs (id, user_id, spec_dir, status, started_at,
                               executor_model, max_scenarios)
-            VALUES ($1, $2, 'pending', $3, $4, $5)
+            VALUES ($1, $2::uuid, $3, 'pending', $4, $5, $6)
             ON CONFLICT (id) DO NOTHING
             """,
             run_id,
+            kwargs.get("user_id"),
             spec_dir,
             datetime.now(timezone.utc),
             kwargs.get("executor_model"),
@@ -74,14 +75,20 @@ async def get(run_id: str) -> dict | None:
     return _row_to_dict(row)
 
 
-async def list_all(limit: int = 100) -> list[dict]:
+async def list_all(user_id: str | None = None, limit: int = 100) -> list[dict]:
     pool = get_pool()
     if not pool:
         return []
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT $1", limit
-        )
+        if user_id:
+            rows = await conn.fetch(
+                "SELECT * FROM jobs WHERE user_id = $1::uuid ORDER BY created_at DESC LIMIT $2",
+                user_id, limit,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT $1", limit
+            )
     return [_row_to_dict(r) for r in rows]
 
 

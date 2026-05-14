@@ -8,6 +8,7 @@ reports/*
 !reports/.gitkeep
 .state/
 node_modules/
+.supabase/
 .playwright-mcp/
 dist/
 *.egg-info/

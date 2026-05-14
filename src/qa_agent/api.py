@@ -290,16 +290,17 @@ async def create_run(req: RunRequest) -> RunStatus:
         slug = Path(req.spec_dir).name.lower()
     run_id = f"{slug}-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}"
     output_dir = Path(req.output)
+    spec_key = req.spec_dir or f"product:{req.product_id}"
 
     state: dict = {
         "run_id": run_id,
         "status": "pending",
-        "spec_dir": req.spec_dir,
+        "spec_dir": spec_key,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     _runs[run_id] = state
     _write_status_file(output_dir, run_id, state)
-    await db_jobs.create(run_id, req.spec_dir,
+    await db_jobs.create(run_id, spec_key,
                          executor_model=req.executor_model,
                          max_scenarios=req.max_scenarios)
 

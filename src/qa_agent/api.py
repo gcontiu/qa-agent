@@ -2,15 +2,23 @@
 FastAPI HTTP wrapper for qa-agent.
 
 Endpoints:
-  POST /runs                     — create a run; returns run_id immediately (202 Accepted)
+  POST /products                              — create a product record
+  GET  /products                              — list all products
+  GET  /products/{id}                         — get product
+  POST /products/{id}/analyze                 — run analyst + save specs to DB (202 Accepted)
+  GET  /products/{id}/analyze/{task_id}       — poll analysis status
+  GET  /products/{id}/specs                   — list specs for a product
+  GET  /products/{id}/specs/{filename}        — get spec content
+  PUT  /products/{id}/specs/{filename}        — create / update spec content
+  DELETE /products/{id}/specs/{filename}      — delete spec
+  POST /products/{id}/specs/{filename}/approve — set approved flag
+
+  POST /runs                     — create a run; accepts spec_dir or product_id (202 Accepted)
   GET  /runs                     — list all runs (in-memory + disk)
   GET  /runs/{run_id}            — poll run status
   POST /runs/{run_id}/cancel     — cancel a pending/running run (202; 409 if already terminal)
   GET  /runs/{run_id}/report     — return report.json
   GET  /health                   — liveness probe
-
-Runs execute as asyncio tasks in the background; status is persisted to
-run_dir/run_status.json so GET /runs/{run_id} survives server restarts.
 """
 from __future__ import annotations
 
@@ -21,16 +29,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 
 from qa_agent.agent import preflight_check, run_requirement
+from qa_agent.analyst import run_analysis
 from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
 from qa_agent.specs import load_spec
 from qa_agent.state import StateStore
 from qa_agent.db import init as db_init, close as db_close
 from qa_agent.db import jobs as db_jobs
+from qa_agent.db import products as db_products
+from qa_agent.db import specs as db_specs
 
 app = FastAPI(title="qa-agent", version="0.1.0")
 
@@ -43,6 +54,9 @@ _runs: dict[str, dict] = {}
 
 # Task registry: run_id → asyncio.Task (for cancellation).
 _tasks: dict[str, asyncio.Task] = {}
+
+# In-memory registry for analysis tasks (not persisted to DB yet).
+_analyses: dict[str, dict] = {}
 
 
 @app.on_event("startup")
@@ -72,8 +86,30 @@ async def _shutdown() -> None:
 # Pydantic schemas
 # ---------------------------------------------------------------------------
 
+class ProductRequest(BaseModel):
+    name: str
+    url: str
+    description: str | None = None
+
+
+class AnalyzeRequest(BaseModel):
+    url: str
+    description: str
+    spec_prefix: str = "SC"
+    pages: list[str] | None = None
+
+
+class SpecUpdateRequest(BaseModel):
+    content: str
+
+
+class ApproveRequest(BaseModel):
+    approved: bool = True
+
+
 class RunRequest(BaseModel):
-    spec_dir: str
+    spec_dir: str | None = None
+    product_id: str | None = None
     env: str | None = None
     output: str = "reports"
     only_failing: bool = False
@@ -92,7 +128,7 @@ class RunSummary(BaseModel):
 class RunStatus(BaseModel):
     run_id: str
     status: Literal["pending", "running", "done", "failed", "cancelled"]
-    spec_dir: str
+    spec_dir: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
     summary: RunSummary | None = None
@@ -116,7 +152,18 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
     _write_status_file(output_dir, run_id, state)
 
     try:
-        bundle = load_spec(Path(req.spec_dir))
+        if req.product_id:
+            files = await db_specs.get_files_dict(req.product_id)
+            if not files:
+                _mark_failed(run_id, state, output_dir, f"No specs found for product {req.product_id}")
+                return
+            temp_dir = output_dir / f"run-{run_id}" / ".specs"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            for filename, content in files.items():
+                (temp_dir / filename).write_text(content, encoding="utf-8")
+            bundle = load_spec(temp_dir)
+        else:
+            bundle = load_spec(Path(req.spec_dir))
         url = bundle.config.get_url(req.env)
     except (FileNotFoundError, ValueError) as e:
         _mark_failed(run_id, state, output_dir, str(e))
@@ -130,9 +177,10 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
 
     requirements = bundle.requirements
 
+    spec_key = req.spec_dir or f"product:{req.product_id}"
     if req.only_failing:
         store = StateStore(_STATE_DB)
-        prev_run_id = store.last_run_id(req.spec_dir)
+        prev_run_id = store.last_run_id(spec_key)
         if prev_run_id:
             failing = store.failing_ids(prev_run_id)
             requirements = [r for r in requirements if r.id in failing]
@@ -177,7 +225,7 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
     store = StateStore(_STATE_DB)
     store.save_run(
         run_id=run_id,
-        spec_path=req.spec_dir,
+        spec_path=spec_key,
         url=url,
         environment=req.env or bundle.config.default_environment,
         started_at=run_id,
@@ -232,7 +280,14 @@ def _write_status_file(output_dir: Path, run_id: str, state: dict) -> None:
 @app.post("/runs", response_model=RunStatus, status_code=202)
 async def create_run(req: RunRequest) -> RunStatus:
     """Start a QA run. Returns immediately with run_id; poll GET /runs/{run_id} for status."""
-    slug = Path(req.spec_dir).name.lower()
+    if not req.spec_dir and not req.product_id:
+        raise HTTPException(status_code=422, detail="Either spec_dir or product_id must be provided")
+
+    if req.product_id:
+        product = await db_products.get(req.product_id)
+        slug = product["name"].lower().replace(" ", "-") if product else "product"
+    else:
+        slug = Path(req.spec_dir).name.lower()
     run_id = f"{slug}-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}"
     output_dir = Path(req.output)
 
@@ -331,6 +386,131 @@ async def get_report(run_id: str, output: str = "reports") -> dict:
         raise HTTPException(status_code=404, detail=f"Report for run '{run_id}' not found")
     return json.loads(report_file.read_text())
 
+
+# ---------------------------------------------------------------------------
+# Products
+# ---------------------------------------------------------------------------
+
+@app.post("/products", status_code=201)
+async def create_product(req: ProductRequest) -> dict:
+    product_id = await db_products.create(req.name, req.url, req.description)
+    product = await db_products.get(product_id)
+    return product
+
+
+@app.get("/products")
+async def list_products() -> list[dict]:
+    return await db_products.list_all()
+
+
+@app.get("/products/{product_id}")
+async def get_product(product_id: str) -> dict:
+    product = await db_products.get(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product '{product_id}' not found")
+    return product
+
+
+# ---------------------------------------------------------------------------
+# Analysis (analyst runs in background, saves specs to DB)
+# ---------------------------------------------------------------------------
+
+async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest) -> None:
+    state = _analyses[task_id]
+    try:
+        output_dir = _DEFAULT_REPORTS_DIR / "analyses" / task_id
+        result = await run_analysis(
+            url=req.url,
+            description=req.description,
+            output_dir=output_dir,
+            spec_prefix=req.spec_prefix,
+            pages=req.pages,
+            product_id=product_id,
+        )
+        state.update({
+            "status": "done",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "files_written": result["files_written"],
+            "file_count": result["file_count"],
+            "summary": result["summary"],
+            "cost_usd": result.get("cost_usd"),
+        })
+    except Exception as e:
+        state.update({
+            "status": "failed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "error": str(e),
+        })
+
+
+@app.post("/products/{product_id}/analyze", status_code=202)
+async def analyze_product(product_id: str, req: AnalyzeRequest) -> dict:
+    """Trigger analyst for a product. Saves generated specs to DB. Poll with GET."""
+    product = await db_products.get(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product '{product_id}' not found")
+
+    task_id = f"analyze-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}"
+    state: dict = {
+        "task_id": task_id,
+        "product_id": product_id,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _analyses[task_id] = state
+    asyncio.create_task(_run_analysis_task(task_id, product_id, req))
+    return state
+
+
+@app.get("/products/{product_id}/analyze/{task_id}")
+async def get_analysis_task(product_id: str, task_id: str) -> dict:
+    state = _analyses.get(task_id)
+    if not state or state.get("product_id") != product_id:
+        raise HTTPException(status_code=404, detail=f"Analysis task '{task_id}' not found")
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Specs CRUD
+# ---------------------------------------------------------------------------
+
+@app.get("/products/{product_id}/specs")
+async def list_specs(product_id: str) -> list[dict]:
+    return await db_specs.list_by_product(product_id)
+
+
+@app.get("/products/{product_id}/specs/{filename:path}")
+async def get_spec(product_id: str, filename: str) -> dict:
+    spec = await db_specs.get_by_filename(product_id, filename)
+    if not spec:
+        raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")
+    return spec
+
+
+@app.put("/products/{product_id}/specs/{filename:path}", status_code=200)
+async def upsert_spec(product_id: str, filename: str, req: SpecUpdateRequest) -> dict:
+    await db_specs.upsert(product_id, filename, req.content)
+    return await db_specs.get_by_filename(product_id, filename)
+
+
+@app.delete("/products/{product_id}/specs/{filename:path}", status_code=204)
+async def delete_spec(product_id: str, filename: str) -> None:
+    deleted = await db_specs.delete(product_id, filename)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")
+
+
+@app.post("/products/{product_id}/specs/{filename:path}/approve")
+async def approve_spec(product_id: str, filename: str, req: ApproveRequest = Body(default=ApproveRequest())) -> dict:
+    updated = await db_specs.set_approved(product_id, filename, req.approved)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")
+    return await db_specs.get_by_filename(product_id, filename)
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
 
 @app.get("/health")
 async def health() -> dict:

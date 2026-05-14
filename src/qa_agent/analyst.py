@@ -124,6 +124,7 @@ async def run_analysis(
     spec_prefix: str = "SC",
     config: LLMConfig | None = None,
     pages: list[str] | None = None,
+    product_id: str | None = None,
 ) -> dict:
     """
     Crawl a product site and generate Gherkin feature files.
@@ -275,6 +276,14 @@ async def run_analysis(
 
     if bb_session_id:
         browserbase.delete_session(bb_session_id)
+
+    if product_id and written_files:
+        from qa_agent.db import is_configured
+        from qa_agent.db import specs as db_specs
+        if is_configured():
+            for filename, content in written_files.items():
+                await db_specs.upsert(product_id, filename, content)
+            console.print(f"[dim]DB: {len(written_files)} spec(s) saved for product {product_id}[/dim]")
 
     console.print()
     for filename in written_files:

@@ -2,9 +2,9 @@
 
 Strategic plan for transitioning qa-agent from a local CLI tool to a hosted SaaS where users authenticate, configure their products (including auth), and run automated test suites. Captures phased deliverables, open decisions, cost projections, and risk register.
 
-> **Status:** CLI mature; SaaS Phase 0.5 complete (cost optimization + analyst quality validated on alconind.ro v2); public-sites-only MVP web app is next.
+> **Status:** CLI mature; Phase 0.5 complete; Step 6 complete (Supabase Auth + multitenancy + minimal sign-in UI deployed on Fly.io); Step 7 (React+Vite dashboard) is next.
 >
-> **Last updated:** 2026-05-11
+> **Last updated:** 2026-05-15
 
 ---
 
@@ -125,10 +125,14 @@ Strict order. Each step gates the next; do not parallelize without reason.
 | 5 | **Postgres schema** (`users`, `products`, `jobs`, `specs`, `reports`) via Supabase | Multi-tenancy foundation. `jobs` replaces in-memory `_runs` dict in `api.py`. |
 | 6 | **Own-auth: Clerk or Supabase Auth** + FastAPI JWT middleware | Users sign up to the SaaS. *Not* auth into the products being tested — that is Phase 3. |
 | 7 | **Per-user rate limit** (slowapi, ~20 LOC) | Prevents single-user cost runaway on day 1 of public access. |
-| 8 | **Next.js scaffold on Vercel**: login → new job → spec review → report | Three pages, shadcn/ui defaults. No design polish yet. |
-| 9 | **Spec viewer/editor (Monaco)** with explicit "Approve & Run" step | Mandatory human-in-the-loop between analyst and executor. Without it, analyst hallucinations create false-fail reports and erode trust. |
-| 10 | **Cost meter component** reading `telemetry.json` / `cost_usd` | Surfaces existing data. Decisive for user trust and perceived value. |
-| 11 | **Live run status page** (poll `GET /runs/{id}`) + final report view | Wraps existing endpoints; no new backend work. |
+| 8 | **React+Vite dashboard — foundation** (Step 7a): scaffold + React Router + Tailwind + shadcn/ui + TanStack Query + Supabase client + sidebar layout + auth migration from static HTML | Establishes the component and routing foundation. Same-domain served by FastAPI — no CORS, no second deploy. See **Frontend stack note** below. |
+| 9 | **Products & Analyst UI** (Step 7b): products list + create, product detail, "Analyze" trigger + polling | Exposes analyst in UI for the first time. |
+| 10 | **Spec viewer/editor** (Step 7c): spec list per product, Monaco editor (lazy-loaded), Save + Approve | Mandatory human-in-the-loop gate. Without approve step, analyst hallucinations reach executor unchecked. Monaco lazy-loaded (~2MB, only on this page). |
+| 11 | **Runs, statistics, report viewer** (Step 7d): run list + status badges, run detail (summary stats + per-scenario results + evidence viewer), cost meter from `telemetry.json` | Wraps existing `GET /runs`, `GET /runs/{id}`, `GET /runs/{id}/report`. Cost meter surfaces existing `cost_usd`. |
+
+> **Frontend stack note (decision 2026-05-15):** The dashboard uses **React + Vite** (not Next.js), served as static files from FastAPI on the same domain. Next.js was rejected because: the dashboard is fully auth-gated (no SEO benefit from SSR), all data comes from FastAPI (no need for Next.js API routes), and running Next.js as a Node server on Fly.io adds a second process with no benefit at this stage. **Marketing/landing site** (when needed) will be a separate sub-project (Next.js or Astro on Vercel/Cloudflare Pages) — the dashboard does not need to be rebuilt for that. **Migration cost React+Vite → Next.js:** ~1 day (components are 1:1 React; only routing structure changes).
+
+> **React stack:** React 18 + TypeScript, Vite, React Router v6, TanStack Query (polling + caching), shadcn/ui + Tailwind CSS, react-hook-form + zod, Monaco Editor (lazy), `@supabase/supabase-js`.
 
 **Stop here for closed beta.** Onboard 5–10 hand-picked users. Validate demand. Stripe + tiered scenario caps come *after* this stage answers "do people want this?".
 
@@ -199,6 +203,7 @@ When a run is triggered with `product_id`, specs are materialized from Supabase 
 | Session expiry handling + re-auth | Long-running runs that outlive auth session |
 | Pen test ($5–10K) | Pre-launch security validation |
 | Update analyst prompt based on production feedback | Spec quality drifts as sites evolve |
+| **Coverage gap analysis** (`POST /products/{id}/coverage-gaps`) | Analyst re-crawls the live app and compares against existing specs; returns a coverage matrix (page/flow → tested ✅ / partial ⚠️ / missing ❌) prioritized by business impact. Lets users catch spec drift when the product evolves without re-running a full analyst pass. Implementation: reuse Playwright MCP crawl + diff against `specs` table in DB. |
 
 ### Phase 5 — Enterprise (4+ weeks, after first paying customers)
 
@@ -302,7 +307,7 @@ These need to be made before / during the next phases. Each comes with a default
 | **D4** | Auth tier scope | Postponed — Phase 3 | Free = public only, paid = auth |
 | **D5** | Worker model | Open | Both (platform-managed + BYO worker for self-host) |
 | **D6** | Browser provider | Open — Phase 1 | Browserbase test pending; fallback self-hosted Playwright on Modal |
-| **D7** | Hosting platform | Open | Vercel + Railway recommended for early stage |
+| **D7** | Frontend hosting | **Closed 2026-05-15** | React+Vite SPA served by FastAPI same-domain on Fly.io (Step 7); marketing site separate (Next.js or Astro on Vercel) when needed |
 | **D8** | Compliance roadmap | Open | Defer SOC2 until enterprise demand |
 | **D9** | Geographic regions | Open | US first, EU within 12 months |
 | **D10** | OAuth at MVP | **Postponed — Phase 3** | Form + API key only at Phase 3 launch |
@@ -347,11 +352,13 @@ The current architecture is largely SaaS-ready. Specific changes needed by phase
 - `pyproject.toml` — add `fastapi`, `uvicorn` to deps
 
 ### Phase 2 (web MVP, public sites only)
-- New repo: `qa-agent-web/` (Next.js, separate from Python core)
-- Python service exposes API; web app calls it
-- Database schema — new file `src/qa_agent/db/schema.sql` or use Supabase migration tools
-- Spec editor UI (Monaco/CodeMirror)
-- Cost meter UI component (reads from telemetry.json or API)
+- `frontend/` directory in same repo — React+Vite SPA (not Next.js; no second deploy)
+- FastAPI serves built static files: `GET /` → `index.html`, `/assets/*` → static, `GET /*` → SPA fallback for React Router
+- Dockerfile updated with Node multi-stage build: `npm ci && npm run build` → `dist/` → copied into Python image
+- Database schema — `supabase/migrations/` (already using Supabase migration tooling)
+- Spec editor UI (Monaco, lazy-loaded in Step 7c)
+- Cost meter UI component (reads `cost_usd` from existing API responses)
+- Marketing/landing site: separate sub-project (Next.js or Astro) when public SEO pages needed — not in this repo
 
 ### Phase 3 (auth foundation + extensions, postponed from old Phase 1.5/2.5)
 - `src/qa_agent/specs/schema.py` — extend Pydantic schema with `Auth` model

@@ -425,6 +425,75 @@ When `SUPABASE_JWT_SECRET` is absent, the FastAPI server also runs in dev mode (
 
 ---
 
+## Web Dashboard (Phase 2 — Steps 7a–7d)
+
+The web dashboard is a React+Vite SPA served directly by the FastAPI server. No second deployment, no CORS configuration.
+
+### Deployment model
+
+```
+browser → https://qa-agent-sp.fly.dev/
+                │
+                ▼
+         FastAPI (Fly.io)
+          ├─ GET /           → src/qa_agent/frontend/index.html   (React entry)
+          ├─ GET /assets/*   → static files (JS/CSS bundles)
+          ├─ GET /*          → index.html (SPA fallback — React Router handles routing)
+          ├─ GET /auth/config → {"supabase_url": "...", "anon_key": "..."}  (public)
+          └─ GET|POST /products, /runs, ...  → FastAPI endpoints (JWT required)
+```
+
+The built static files live at `src/qa_agent/frontend/` inside the Python package — included automatically in the Docker `COPY src/` step.
+
+### Multi-stage Dockerfile
+
+```dockerfile
+# Stage 1: build React app
+FROM node:20-slim AS frontend-build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build          # → /app/dist/
+
+# Stage 2: Python image (existing)
+FROM python:3.12-slim
+# ... existing steps ...
+COPY --from=frontend-build /app/dist /app/src/qa_agent/frontend/
+```
+
+Node is already present in the Dockerfile (required for `@playwright/mcp`), so the multi-stage build adds no new base image dependency.
+
+### React stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Build | Vite | Fast HMR, simple config, outputs plain static files |
+| Routing | React Router v6 | Standard; file-based routing (Next.js) is unnecessary overhead for ~10 pages |
+| Data fetching | TanStack Query | Built-in polling, caching, refetch on focus — maps directly to `pending→running→done` status pattern |
+| UI components | shadcn/ui (Radix + Tailwind) | Copy-paste components, no lock-in, professional defaults |
+| Styling | Tailwind CSS | Standard; co-located with shadcn |
+| Forms | react-hook-form + zod | Type-safe validation |
+| Code editor | Monaco (lazy-loaded) | Gherkin spec editing; ~2MB chunk loaded only on the spec editor page |
+| Auth | `@supabase/supabase-js` | Same SDK used for sign-up/sign-in; stores session, auto-refreshes token |
+
+### Dashboard pages (Step 7 milestones)
+
+| Milestone | Pages | Key interactions |
+|---|---|---|
+| **7a — Foundation** | Auth (login/signup), app layout (sidebar + topnav) | Supabase session → `Authorization: Bearer` on all API calls |
+| **7b — Products & Analyst** | Products list, Product detail, Analyze trigger | `POST /products`, `POST /products/{id}/analyze` + polling |
+| **7c — Spec editor** | Spec list, Monaco editor per file | `GET/PUT /products/{id}/specs/{file}`, `POST .../approve` |
+| **7d — Runs & Reports** | Runs list, Run detail (stats + per-scenario + evidence), cost meter | `POST /runs`, `GET /runs/{id}` polling, `GET /runs/{id}/report` |
+
+### Marketing / landing site
+
+The dashboard is an authenticated internal app with no SEO requirements. When a public marketing site is needed (landing page, pricing, blog), it will be built as a **separate sub-project** (Next.js or Astro) on Vercel or Cloudflare Pages — a different domain or sub-domain. The dashboard codebase does not need to change.
+
+**Migration cost React+Vite → Next.js (if ever needed for the dashboard):** ~1 day. React components are 1:1; only routing structure and build config change.
+
+---
+
 ## Output Contract
 
 Per-run artifacts under `reports/run-<ISO-timestamp>/`:

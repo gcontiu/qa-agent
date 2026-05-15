@@ -348,44 +348,55 @@ qa-agent is multi-tenant. Every product, spec, and job belongs to exactly one us
 |---|---|---|
 | `auth.users` (Supabase-managed schema) | Supabase | Source of truth for credentials, password hashes, OAuth provider links, session tokens. Not referenced directly from business tables. |
 | `public.users` (our schema) | qa-agent | Mirror keyed by the same UUID. All business-table foreign keys (`products.user_id`, `jobs.user_id`) reference this table. |
-| Sync trigger `on_auth_user_created` | Postgres trigger | When Supabase inserts into `auth.users`, the trigger inserts a matching row into `public.users` (`id`, `email`, `created_at`). |
+| Sync trigger `on_auth_user_created` | Postgres trigger | When Supabase inserts into `auth.users`, the trigger inserts a matching row into `public.users` (`id`, `email`, `created_at`). The trigger uses `SECURITY DEFINER` because `supabase_auth_admin` (which owns `auth.users`) lacks INSERT on `public.users`. |
 
 **Why the mirror exists (D1 = Option B):** business tables never depend on `auth.users` directly. If we migrate away from Supabase Auth, `public.users` stays intact — only the sync trigger and the JWT verification middleware need to change. Without the mirror, every business FK would point at a Supabase-specific table and a migration would require schema-level rewrites.
 
 ### JWT verification (D2 = local)
 
-The frontend obtains a Supabase session and sends `Authorization: Bearer <access_token>` on every request. The FastAPI middleware decodes the JWT **locally** using the Supabase project's JWT secret (HS256), no network call to Supabase per request.
+The frontend obtains a Supabase session and sends `Authorization: Bearer <access_token>` on every request. The FastAPI middleware (`src/qa_agent/auth.py`) decodes the JWT **locally** using the Supabase project's JWT secret (HS256), no network call to Supabase per request.
 
 ```
 SUPABASE_JWT_SECRET   — project JWT secret (HS256). Set as Fly secret.
+                        Source: Supabase dashboard → Settings → API →
+                        JWT Settings → "Legacy JWT Secret" tab → Reveal.
+                        (Not "JWT Signing Keys" — those are RS256, incompatible
+                        with the current HS256 implementation.)
 SUPABASE_URL          — used only by frontend SDK; backend doesn't need it.
 ```
 
-The middleware extracts `sub` (user UUID) and `email` from the JWT claims and exposes them as `current_user` via `Depends(get_current_user)`. Tokens are verified for signature, expiry, and audience (`authenticated`).
+The middleware extracts `sub` (user UUID) and `email` from the JWT claims and returns a `CurrentUser(user_id, email)` dataclass via `Depends(get_current_user)`. Tokens are verified for signature, expiry, audience (`authenticated`), and UUID format of `sub` (invalid UUID → 401, not 500).
+
+**Dev mode:** when `SUPABASE_JWT_SECRET` is not set, `get_current_user` returns a fixed dev user (`00000000-0000-0000-0000-000000000000 / dev@localhost`) instead of raising 401. This preserves the local-dev workflow without Supabase configured — consistent with `DATABASE_URL` absent → DB calls are no-ops.
 
 **Why local:** ~50–100ms saved per request vs. calling `/auth/v1/user`. The trade-off — a revoked session remains valid until the access token expires (default 1h) — is acceptable for an MVP.
 
 ### Multi-tenancy enforcement (D3 = both layers)
 
-Two independent layers, applied together:
+Two independent layers are in place. Their current activation state differs:
 
-1. **Application-level filters** in `db/products.py`, `db/specs.py`, `db/jobs.py`. Every CRUD function takes `user_id` and includes it in `WHERE` clauses. First line of defense, easy to read and debug.
-2. **Row Level Security (RLS) in Postgres** on `products`, `specs`, `jobs`. Policies key off `auth.uid()` (Supabase's helper that reads the JWT claim from the connection). Defense-in-depth — even if the application accidentally omits a filter, RLS blocks cross-tenant reads/writes.
+**Layer 1 — Application-level filters (active):**
+Every CRUD function in `db/products.py` and `db/jobs.py` accepts `user_id` and includes it in `WHERE` clauses. Spec access is gated via `_get_owned_product()` in `api.py`, which verifies product ownership before any spec operation. All API endpoints except `/health` require a valid JWT via `Depends(get_current_user)`. This is the primary enforcement layer.
 
-Example policy:
+**Layer 2 — Row Level Security in Postgres (present, not yet active via asyncpg):**
+RLS is enabled on `products`, `specs`, `jobs` and policies key off `auth.uid()`. However, the current `DATABASE_URL` on Fly.io is a **service-role** connection, which bypasses RLS by design. RLS enforcement via `auth.uid()` requires either (a) the PostgREST layer Supabase provides, or (b) injecting JWT claims per-connection (`SET LOCAL request.jwt.claims = ...`) in asyncpg. Neither is implemented yet.
+
 ```sql
+-- RLS policy (present in schema, bypassed by service-role):
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "users_own_products" ON products
   FOR ALL USING (user_id = auth.uid());
 ```
 
-`auth.uid()` is the only Supabase-specific surface inside our SQL. On migration, it is replaced with `current_setting('app.user_id')::uuid` populated by the new auth middleware.
+`auth.uid()` is the only Supabase-specific surface inside the SQL policies. On migration away from Supabase Auth, replace with `current_setting('app.user_id')::uuid` populated by the new auth middleware.
+
+**Current production security posture:** app-level filters are the sole active isolation boundary. RLS is defense-in-depth infrastructure ready for when the DB connection is split into a constrained authenticated role.
 
 ### CLI and local development
 
-The CLI bypasses JWT verification by connecting to Postgres with the **service-role key** (`DATABASE_URL` configured for service role). Service-role connections automatically bypass RLS. This keeps the CLI usable for local dev and ops without requiring login flows.
+The CLI bypasses JWT verification by connecting to Postgres with the **service-role key** (`DATABASE_URL` in `.env`). Service-role connections automatically bypass RLS. This keeps the CLI usable for local dev and ops without requiring login flows.
 
-Never use the service-role key from the FastAPI server in production — the server connects with a constrained role and relies on RLS for isolation.
+When `SUPABASE_JWT_SECRET` is absent, the FastAPI server also runs in dev mode (single dev user, no JWT required). Both modes are intentional and symmetric.
 
 ### Vendor lock-in summary
 
@@ -393,7 +404,7 @@ Never use the service-role key from the FastAPI server in production — the ser
 |---|---|---|
 | Postgres database | None | `pg_dump` → restore anywhere. |
 | `public.users` mirror | None | Owned by us; survives provider change. |
-| JWT middleware | Low | Swap the verification function (one file). |
+| JWT middleware | Low | Swap verification function in `auth.py` (one file). |
 | RLS policies | Low | Replace `auth.uid()` with `current_setting('app.user_id')`. |
 | OAuth providers | Low | Re-register apps with the new provider; users re-login. |
 | Email flows (verify, reset, magic link) | Low | Config change to Resend/Postmark/SES. |
@@ -405,6 +416,7 @@ Never use the service-role key from the FastAPI server in production — the ser
 
 | Feature | Status |
 |---|---|
+| RLS via authenticated DB role | Before Phase 2 public launch — split `DATABASE_URL` into service-role (CLI) and authenticated-role (server) + inject JWT claims in asyncpg |
 | SAML SSO | Supabase Pro tier; deferred to Phase 5 |
 | SCIM provisioning | Supabase Enterprise tier; Phase 5 |
 | TOTP 2FA | Built into Supabase Auth; enable in dashboard if needed |

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Body
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from qa_agent.agent import preflight_check, run_requirement
@@ -47,6 +48,7 @@ from qa_agent.db import specs as db_specs
 app = FastAPI(title="qa-agent", version="0.1.0")
 
 _DEFAULT_REPORTS_DIR = Path("reports")
+_FRONTEND_DIR = Path(__file__).parent / "frontend"
 _STATE_DB = Path("reports/.state/runs.db")
 
 # In-memory registry: run_id → status dict.
@@ -621,3 +623,21 @@ async def approve_spec(
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "version": "0.1.0"}
+
+
+# ---------------------------------------------------------------------------
+# Frontend
+# ---------------------------------------------------------------------------
+
+@app.get("/auth/config")
+async def auth_config() -> dict:
+    """Return public Supabase config needed by the frontend JS SDK. No auth required."""
+    return {
+        "supabase_url": os.getenv("SUPABASE_URL", ""),
+        "anon_key": os.getenv("SUPABASE_ANON_KEY", ""),
+    }
+
+
+@app.get("/")
+async def frontend() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "index.html")

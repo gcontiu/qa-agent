@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>qa-agent</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; padding: 2rem; }
+    .card { background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.1); padding: 2rem; width: 100%; max-width: 420px; }
+    h1 { font-size: 1.2rem; margin-bottom: 1.5rem; color: #111; }
+    .tabs { display: flex; gap: 1rem; margin-bottom: 1.5rem; border-bottom: 1px solid #e5e5e5; }
+    .tab { background: none; border: none; padding: .5rem 0; cursor: pointer; font-size: .9rem; color: #666; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab.active { color: #111; border-bottom-color: #4f46e5; font-weight: 600; }
+    label { display: block; font-size: .8rem; color: #444; margin-bottom: .3rem; }
+    input[type=email], input[type=password] { width: 100%; padding: .6rem .8rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: .9rem; margin-bottom: 1rem; }
+    input:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,.15); }
+    button.primary { width: 100%; padding: .65rem; background: #4f46e5; color: white; border: none; border-radius: 6px; font-size: .9rem; cursor: pointer; font-weight: 500; }
+    button.primary:hover { background: #4338ca; }
+    button.primary:disabled { background: #a5b4fc; cursor: not-allowed; }
+    .msg { margin-top: 1rem; font-size: .85rem; padding: .6rem .8rem; border-radius: 6px; }
+    .msg.error { background: #fef2f2; color: #b91c1c; }
+    .msg.success { background: #f0fdf4; color: #15803d; }
+    .msg.info { background: #eff6ff; color: #1d4ed8; }
+    .session { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e5e5e5; }
+    .session h2 { font-size: .8rem; color: #6b7280; margin-bottom: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+    .token-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: .6rem; font-family: monospace; font-size: .68rem; word-break: break-all; color: #374151; margin-bottom: .75rem; max-height: 72px; overflow-y: auto; }
+    .row { display: flex; gap: .5rem; margin-bottom: .5rem; }
+    .row button { flex: 1; padding: .5rem; border-radius: 6px; font-size: .8rem; cursor: pointer; border: 1px solid #d1d5db; background: white; color: #374151; }
+    .row button:hover { background: #f9fafb; }
+    #signout { margin-top: .75rem; width: 100%; padding: .5rem; border-radius: 6px; border: 1px solid #fca5a5; background: #fff; color: #dc2626; font-size: .85rem; cursor: pointer; }
+    #signout:hover { background: #fef2f2; }
+    .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 5px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>qa-agent</h1>
+
+  <div id="cfg-err" hidden style="color:#b91c1c;font-size:.85rem;margin-bottom:1rem;"></div>
+
+  <div id="auth-panel">
+    <div class="tabs">
+      <button class="tab active" onclick="setTab('signin')">Sign in</button>
+      <button class="tab" onclick="setTab('signup')">Sign up</button>
+    </div>
+
+    <div id="form-signin">
+      <label for="si-email">Email</label>
+      <input type="email" id="si-email" placeholder="you@example.com" autocomplete="email">
+      <label for="si-pw">Password</label>
+      <input type="password" id="si-pw" placeholder="••••••••" autocomplete="current-password">
+      <button class="primary" id="btn-signin" onclick="signIn()">Sign in</button>
+    </div>
+
+    <div id="form-signup" hidden>
+      <label for="su-email">Email</label>
+      <input type="email" id="su-email" placeholder="you@example.com" autocomplete="email">
+      <label for="su-pw">Password</label>
+      <input type="password" id="su-pw" placeholder="min 6 characters" autocomplete="new-password">
+      <button class="primary" id="btn-signup" onclick="signUp()">Create account</button>
+    </div>
+
+    <div id="auth-msg" hidden class="msg"></div>
+  </div>
+
+  <div id="session-panel" hidden class="session">
+    <h2>Signed in</h2>
+    <div id="user-email" style="font-size:.85rem;margin-bottom:.75rem;color:#374151;"></div>
+    <div style="font-size:.72rem;color:#6b7280;margin-bottom:.3rem;">Access token</div>
+    <div class="token-box" id="token-display"></div>
+    <div class="row">
+      <button onclick="copyToken()">Copy token</button>
+      <button onclick="testAPI()">GET /products</button>
+    </div>
+    <div id="api-result" hidden class="msg"></div>
+    <button id="signout" onclick="signOut()">Sign out</button>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+let supabase = null
+let currentToken = null
+
+async function init() {
+  try {
+    const res = await fetch('/auth/config')
+    const cfg = await res.json()
+    if (!cfg.supabase_url || !cfg.anon_key) {
+      showCfgErr('SUPABASE_URL / SUPABASE_ANON_KEY not configured on server.')
+      return
+    }
+    supabase = createClient(cfg.supabase_url, cfg.anon_key)
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) showSession(session)
+    supabase.auth.onAuthStateChange((_e, session) => {
+      if (session) showSession(session); else showAuth()
+    })
+  } catch (err) {
+    showCfgErr('Failed to load config: ' + err.message)
+  }
+}
+
+function showCfgErr(msg) {
+  const el = document.getElementById('cfg-err')
+  el.textContent = msg
+  el.hidden = false
+}
+
+function showSession(session) {
+  currentToken = session.access_token
+  document.getElementById('auth-panel').hidden = true
+  document.getElementById('session-panel').hidden = false
+  document.getElementById('user-email').textContent = session.user?.email || ''
+  document.getElementById('token-display').textContent = session.access_token
+  document.getElementById('api-result').hidden = true
+}
+
+function showAuth() {
+  currentToken = null
+  document.getElementById('auth-panel').hidden = false
+  document.getElementById('session-panel').hidden = true
+  hideMsg()
+}
+
+window.setTab = function(tab) {
+  document.getElementById('form-signin').hidden = tab !== 'signin'
+  document.getElementById('form-signup').hidden = tab !== 'signup'
+  document.querySelectorAll('.tab').forEach((t, i) =>
+    t.classList.toggle('active', (tab === 'signin' && i === 0) || (tab === 'signup' && i === 1))
+  )
+  hideMsg()
+}
+
+window.signIn = async function() {
+  const btn = document.getElementById('btn-signin')
+  setLoading(btn, 'Signing in…')
+  const { error } = await supabase.auth.signInWithPassword({
+    email: document.getElementById('si-email').value.trim(),
+    password: document.getElementById('si-pw').value,
+  })
+  resetBtn(btn, 'Sign in')
+  if (error) showMsg('error', error.message)
+}
+
+window.signUp = async function() {
+  const btn = document.getElementById('btn-signup')
+  setLoading(btn, 'Creating account…')
+  const { error } = await supabase.auth.signUp({
+    email: document.getElementById('su-email').value.trim(),
+    password: document.getElementById('su-pw').value,
+  })
+  resetBtn(btn, 'Create account')
+  if (error) showMsg('error', error.message)
+  else showMsg('success', 'Account created! Check your email to confirm, then sign in.')
+}
+
+window.signOut = async function() {
+  await supabase.auth.signOut()
+}
+
+window.copyToken = function() {
+  if (!currentToken) return
+  navigator.clipboard.writeText(currentToken)
+    .then(() => showMsg('success', 'Token copied to clipboard.'))
+    .catch(() => showMsg('error', 'Copy failed — select the token manually.'))
+}
+
+window.testAPI = async function() {
+  const el = document.getElementById('api-result')
+  el.className = 'msg info'; el.textContent = 'Loading…'; el.hidden = false
+  try {
+    const res = await fetch('/products', { headers: { Authorization: 'Bearer ' + currentToken } })
+    const data = await res.json()
+    el.className = 'msg ' + (res.ok ? 'success' : 'error')
+    el.textContent = res.ok
+      ? `${res.status} OK — ${Array.isArray(data) ? data.length : 1} product(s) returned`
+      : `${res.status} ${JSON.stringify(data)}`
+  } catch (err) {
+    el.className = 'msg error'; el.textContent = 'Request failed: ' + err.message
+  }
+}
+
+function showMsg(type, text) {
+  const el = document.getElementById('auth-msg')
+  el.className = 'msg ' + type; el.textContent = text; el.hidden = false
+}
+function hideMsg() { document.getElementById('auth-msg').hidden = true }
+function setLoading(btn, text) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + text }
+function resetBtn(btn, text) { btn.disabled = false; btn.textContent = text }
+
+init()
+</script>
+</body>
+</html>

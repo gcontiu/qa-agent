@@ -7,6 +7,7 @@ import ProtectedRoute from '@/components/layout/ProtectedRoute'
 import LoginPage from '@/pages/LoginPage'
 import ProductsPage from '@/pages/ProductsPage'
 import ProductDetailPage from '@/pages/ProductDetailPage'
+import SpecEditorPage from '@/pages/SpecEditorPage'
 import RunsPage from '@/pages/RunsPage'
 
 const queryClient = new QueryClient({
@@ -31,6 +32,7 @@ export default function App() {
             >
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/products/:id" element={<ProductDetailPage />} />
+              <Route path="/products/:id/specs/*" element={<SpecEditorPage />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/" element={<Navigate to="/products" replace />} />
             </Route>

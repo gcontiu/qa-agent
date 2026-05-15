@@ -30,7 +30,24 @@ uv run qa-agent analyze <url> -d "<description>" -p <PREFIX> --pages "/,/about,/
 # Start the HTTP API server (Phase 1 — cloud-readiness)
 uv run qa-agent serve                    # default 0.0.0.0:8000
 uv run qa-agent serve --port 9000 --reload  # dev mode with auto-reload
+
+# --- Web dashboard (Step 7) ---
+
+# Option A: hot-reload dev (two terminals)
+#   Terminal 1 — Python backend
+uv run --env-file .env uvicorn qa_agent.api:app --port 8081
+#   Terminal 2 — Vite frontend (open http://localhost:5173)
+cd frontend && npm run dev
+
+# Option B: build once, serve everything from FastAPI
+cd frontend && npm run build && cp -r dist/. ../src/qa_agent/frontend/
+uv run --env-file .env uvicorn qa_agent.api:app --port 8081
+# → open http://localhost:8081
 ```
+
+**Option A vs Option B:**
+- **Option A** — use while working on the UI. Vite serves React at `:5173` with instant hot reload; API calls are proxied automatically to `:8081`. Two processes required.
+- **Option B** — use when you only need the backend (QA runs, API testing). Build the frontend once and FastAPI serves everything at `:8081`. Single process.
 
 `uv` manages the Python 3.12 virtualenv automatically. No manual `pip install` needed.
 

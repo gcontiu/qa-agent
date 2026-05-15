@@ -67,9 +67,29 @@ _tasks: dict[str, asyncio.Task] = {}
 _analyses: dict[str, dict] = {}
 
 
+async def _ensure_dev_user() -> None:
+    """Insert the dev user row when running without SUPABASE_JWT_SECRET (local dev only)."""
+    from qa_agent.auth import _DEV_USER_ID, _DEV_USER_EMAIL  # type: ignore[attr-defined]
+    from qa_agent.db import get_pool
+    if os.getenv("SUPABASE_JWT_SECRET"):
+        return
+    pool = get_pool()
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (id, email) VALUES ($1::uuid, $2)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            _DEV_USER_ID, _DEV_USER_EMAIL,
+        )
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     await db_init()
+    await _ensure_dev_user()
     await db_jobs.mark_interrupted()
     for status_file in _DEFAULT_REPORTS_DIR.glob("run-*/run_status.json"):
         try:

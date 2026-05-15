@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# Node 20 — required for npx @playwright/mcp
+# Node 20 — required for npx @playwright/mcp and React build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -12,8 +12,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Step 1: install dependencies only (cacheable layer — rebuilt only when
-# pyproject.toml or uv.lock change, not when src/ changes).
+# Step 1: install Python dependencies only (cacheable — rebuilt when pyproject.toml or uv.lock change).
 COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev --no-install-project \
     --allow-insecure-host pypi.org \
@@ -30,8 +29,20 @@ RUN if [ "$INSTALL_CHROMIUM" = "true" ]; then \
     npx playwright install --with-deps chromium; \
     fi
 
-# Step 2: copy source, then install the local package into the existing venv.
+# Step 2: build React frontend (Node is already present above).
+# Cached when frontend/package-lock.json hasn't changed.
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN cd frontend && npm ci
+
+COPY frontend/ ./frontend/
+RUN cd frontend && npm run build
+
+# Step 3: copy Python source and built frontend into package, then install.
 COPY src/ ./src/
+RUN rm -rf src/qa_agent/frontend && \
+    mkdir -p src/qa_agent/frontend && \
+    cp -r frontend/dist/. src/qa_agent/frontend/
+
 RUN uv sync --no-dev \
     --allow-insecure-host pypi.org \
     --allow-insecure-host files.pythonhosted.org

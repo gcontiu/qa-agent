@@ -8,6 +8,8 @@ reports/*
 !reports/.gitkeep
 .state/
 node_modules/
+frontend/dist/
+src/qa_agent/frontend/assets/
 .supabase/
 .playwright-mcp/
 dist/

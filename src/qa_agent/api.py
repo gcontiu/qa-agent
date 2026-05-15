@@ -31,6 +31,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Body
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from qa_agent.agent import preflight_check, run_requirement
@@ -50,6 +51,10 @@ app = FastAPI(title="qa-agent", version="0.1.0")
 _DEFAULT_REPORTS_DIR = Path("reports")
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
 _STATE_DB = Path("reports/.state/runs.db")
+
+_assets_dir = _FRONTEND_DIR / "assets"
+if _assets_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
 
 # In-memory registry: run_id → status dict.
 # Dual-written to Postgres when DATABASE_URL is set.
@@ -638,6 +643,7 @@ async def auth_config() -> dict:
     }
 
 
-@app.get("/")
-async def frontend() -> FileResponse:
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str) -> FileResponse:
+    """SPA fallback — serve index.html for all non-API routes so React Router works."""
     return FileResponse(_FRONTEND_DIR / "index.html")

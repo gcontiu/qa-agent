@@ -336,6 +336,10 @@ Status is persisted to `run_dir/run_status.json` so it survives server restarts.
 
 `POST /runs/{run_id}/cancel` requests the cancellation of a background task. The task stops at the next `await` point (typically between scenarios). Returns `409 Conflict` if the run is already in a terminal state (`done`, `failed`, `cancelled`) or if the task has no live asyncio reference (orphaned from a previous server session).
 
+**Per-user rate limiting:**
+
+Two endpoints carry per-user limits enforced by `slowapi`: `POST /runs` (10/hour) and `POST /products/{id}/analyze` (3/hour). The limit key is the user UUID from the JWT `sub` claim, falling back to client IP. Exceeding the limit returns HTTP 429. See [`docs/timeout-strategy.md`](timeout-strategy.md#per-user-api-rate-limiting-slowapi) for configuration details and impact analysis.
+
 ---
 
 ## Authentication
@@ -491,6 +495,91 @@ Node is already present in the Dockerfile (required for `@playwright/mcp`), so t
 The dashboard is an authenticated internal app with no SEO requirements. When a public marketing site is needed (landing page, pricing, blog), it will be built as a **separate sub-project** (Next.js or Astro) on Vercel or Cloudflare Pages — a different domain or sub-domain. The dashboard codebase does not need to change.
 
 **Migration cost React+Vite → Next.js (if ever needed for the dashboard):** ~1 day. React components are 1:1; only routing structure and build config change.
+
+---
+
+## Run Observability — LogSink
+
+Real-time log streaming for analyst and executor runs, visible in the web dashboard while a task is in progress.
+
+### Design
+
+A single `LogSink` abstraction with one method (`emit(msg: str)`) is passed into `run_analysis()` and `run_requirement()`. Two implementations exist:
+
+| Implementation | Used by | Behaviour |
+|---|---|---|
+| `ConsoleSink` | CLI (`qa-agent run`, `qa-agent analyze`) | Wraps existing Rich console output — no change to CLI UX |
+| `BufferSink` | FastAPI background tasks | Appends `{"ts": float, "msg": str}` to an in-memory list |
+
+The in-memory list is stored directly in the task's state dict (`_analyses[task_id]["logs"]` / `_runs[run_id]["logs"]`), so no separate registry is needed.
+
+### Data flow
+
+```
+analyst.py / agent.py
+  sink.emit("Navigating to /about…")
+  sink.emit("Writing homepage.feature (3 scenarios)…")
+        │
+        ▼  BufferSink.append({"ts": …, "msg": …})
+_analyses[task_id]["logs"]   /   _runs[run_id]["logs"]
+        │
+        ▼  HTTP polling (cursor-based)
+GET /products/{id}/analyze/{task_id}/logs?since=N
+GET /runs/{run_id}/logs?since=N
+  → {"events": [...], "next": N+k}
+        │
+        ▼  TanStack Query — refetchInterval: 2000ms while active
+<LogPanel />  (scrollable, auto-scroll to bottom)
+```
+
+### Cursor-based polling
+
+Both endpoints accept a `?since=N` cursor. They return only `events[N:]` plus the new cursor `next = len(events)`. The frontend stores the cursor in component state and appends each batch — no duplicates, no missed events on reconnect.
+
+### What gets emitted
+
+**Analyst** (`analyst.py`):
+
+| Trigger | Message |
+|---|---|
+| Browser tool call `browser_navigate` | `"Navigating to {url}"` |
+| Browser tool call `browser_snapshot` | `"Reading page content"` |
+| Browser tool call `browser_click` / `browser_type` | `"Clicking on {element}"` / `"Typing into {element}"` |
+| `write_feature_file` called | `"Writing {filename} ({n} scenarios)"` |
+| `finish_analysis` called | `"Analysis complete: {summary}"` |
+| LLM error | `"LLM error on turn {n}: {msg}"` |
+
+**Executor** (`api.py` loop + `agent.py`):
+
+| Trigger | Message |
+|---|---|
+| Scenario start (in `_execute_job` loop) | `"[3/8] SC-003 — Contact form validates email"` |
+| Browser navigate / snapshot / action | same mapping as analyst |
+| Scenario verdict | `"[3/8] ✓ pass (12.3s)"` / `"[3/8] ✗ fail (8.1s)"` |
+| Cancellation | `"Cancelled after 3/8 scenarios"` |
+| Run complete | `"Done: 6 passed, 1 failed, 1 errored"` |
+
+Tool-name → human-readable message translation lives in a single helper `_humanize_tool_call(name, args) -> str | None` (returns `None` for uninteresting calls that are not surfaced).
+
+### Memory safety
+
+Log lists are capped at 500 events. If the cap is hit, a single truncation marker is prepended (`"… N earlier events truncated"`) and the oldest events are dropped. Runs that end (any terminal state) retain their logs in the state dict for as long as the process runs — same lifecycle as existing run state.
+
+### Frontend component
+
+A single reusable `<LogPanel endpoint="..." active={bool} />` component is used in both `ProductDetailPage` (analyst logs) and `RunDetailPage` (executor logs). It manages its own `since` cursor, appends batches to local state, and auto-scrolls to the bottom while `active=true`.
+
+### Files affected
+
+| File | Change |
+|---|---|
+| `src/qa_agent/log_sink.py` | New — `LogSink` protocol + `ConsoleSink` + `BufferSink` |
+| `src/qa_agent/analyst.py` | Accept `sink` param; emit at key points; tool-name mapping |
+| `src/qa_agent/agent.py` | Accept `sink` param; emit per-action |
+| `src/qa_agent/api.py` | Instantiate `BufferSink`; store in state dict; two new GET endpoints |
+| `frontend/src/components/LogPanel.tsx` | New — polling log display component |
+| `frontend/src/pages/ProductDetailPage.tsx` | Integrate `<LogPanel>` for analyst task |
+| `frontend/src/pages/RunDetailPage.tsx` | Integrate `<LogPanel>` for run task |
 
 ---
 

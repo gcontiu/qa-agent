@@ -14,6 +14,7 @@ export default defineConfig({
       '/auth': 'http://localhost:8081',
       '/products': 'http://localhost:8081',
       '/runs': 'http://localhost:8081',
+      '/spec-dirs': 'http://localhost:8081',
       '/health': 'http://localhost:8081',
     },
   },

@@ -121,6 +121,7 @@ QA_RATE_LIMIT_WAIT=30     # shorter wait (if you know your quota resets faster)
 
 ### Inter-Scenario Delay (`QA_SCENARIO_DELAY`)
 
+
 **What it does:** Inserts an `asyncio.sleep()` pause *between* scenario executions — after one scenario completes and before the next Browserbase session is created.
 
 **Why needed:** Anti-bot systems (Cloudflare, reCAPTCHA) detect repeated automated sessions from the same IP pool. Empirically observed on emag.ro: the first 6–7 consecutive Browserbase sessions succeed; subsequent ones trigger human-verification challenges. A short delay between sessions lowers the request frequency below the detection threshold.
@@ -145,3 +146,38 @@ QA_SCENARIO_DELAY=3   # default in cloud API
 ```
 
 ---
+
+### Per-User API Rate Limiting (`slowapi`)
+
+**What it does:** Limits how many expensive operations (executor runs and analyst crawls) a single user can trigger per hour. Prevents runaway LLM costs caused by accidental spam or a malicious actor.
+
+**Applies to:**
+
+| Endpoint | Limit | Rationale |
+|---|---|---|
+| `POST /runs` | **10/hour** | Executor run: ~$0.78 each — 10 runs = ~$7.80/user/hour cap |
+| `POST /products/{id}/analyze` | **3/hour** | Analyst crawl: ~$1.40 each — 3 crawls = ~$4.20/user/hour cap |
+
+All other endpoints (GET polling, spec CRUD) are unlimited — they are cheap reads with no LLM cost.
+
+**Key function:** Limits are keyed on the **user UUID** extracted from the JWT `sub` claim. If the JWT is absent or invalid, falls back to client IP. This ensures the limit is per-authenticated-user, not per IP — two users on the same office network have independent buckets.
+
+**Error response (HTTP 429):**
+```json
+{"detail": "Rate limit exceeded: 10 per 1 hour. Please try again later."}
+```
+
+**Implementation:** `slowapi` middleware registered on the FastAPI app (`api.py`). The `_rate_limit_key()` helper decodes the JWT header to extract `sub` without going through the `get_current_user` dependency.
+
+**Impact on legitimate MVP users:**
+A user testing their product typically does 1 analyst run + 2–3 executor runs in a session. Both limits reset hourly, so a typical day of 3–4 cycles (analyst + several runs) stays well within the caps. The limit only triggers for accidental loops or abuse.
+
+**Dev mode:** When `SUPABASE_JWT_SECRET` is absent (local dev without Supabase), the key function falls back to IP. The limit still applies but is keyed on the machine's IP — effectively no isolation between roles, which is intentional for local dev.
+
+**Changing the limits:** Edit the `@limiter.limit(...)` decorators in `src/qa_agent/api.py`. Limits use slowapi string format: `"N/period"` where period is `second`, `minute`, `hour`, `day`.
+
+```python
+# api.py — current defaults
+@limiter.limit("10/hour")   # POST /runs
+@limiter.limit("3/hour")    # POST /products/{id}/analyze
+```

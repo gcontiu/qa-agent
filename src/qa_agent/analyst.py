@@ -13,6 +13,7 @@ Usage (CLI):
 """
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from rich.panel import Panel
 from qa_agent.agent import _make_server_params
 from qa_agent import browserbase
 from qa_agent.llm import LLMConfig, complete, ensure_provider_running, estimate_cost
+from qa_agent.log_sink import LogSink, _humanize_tool_call
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 MAX_TURNS = 50  # Analyst needs more turns to crawl a full site
@@ -91,12 +93,26 @@ def _system_prompt() -> str:
     return (PROMPTS_DIR / "analyst_system.md").read_text()
 
 
-def _user_message(url: str, description: str, spec_prefix: str, output_dir: str, pages: list[str] | None = None) -> str:
+def _truncate_gherkin(content: str, max_scenarios: int) -> str:
+    """Hard-cap a .feature file to at most max_scenarios Scenario blocks."""
+    pattern = re.compile(r'(?=^\s*Scenario(?:\s+Outline)?:)', re.MULTILINE)
+    parts = pattern.split(content)
+    if len(parts) <= 1 + max_scenarios:
+        return content
+    return (parts[0] + ''.join(parts[1:1 + max_scenarios])).rstrip() + '\n'
+
+
+def _user_message(url: str, description: str, spec_prefix: str, output_dir: str, pages: list[str] | None = None, max_scenarios_per_file: int | None = None) -> str:
+    scenario_cap_line = (
+        f"IMPORTANT: Write at most {max_scenarios_per_file} Scenario(s) per feature file.\n\n"
+        if max_scenarios_per_file else ""
+    )
     base = (
         f"Product URL: {url}\n"
         f"Product description: {description}\n"
         f"Scenario ID prefix: {spec_prefix}\n"
         f"Output directory: {output_dir}\n\n"
+        f"{scenario_cap_line}"
     )
     if pages:
         paths_block = "\n".join(f"  - {p}" for p in pages)
@@ -125,6 +141,8 @@ async def run_analysis(
     config: LLMConfig | None = None,
     pages: list[str] | None = None,
     product_id: str | None = None,
+    max_scenarios_per_file: int | None = None,
+    sink: LogSink | None = None,
 ) -> dict:
     """
     Crawl a product site and generate Gherkin feature files.
@@ -188,7 +206,7 @@ async def run_analysis(
 
             messages: list[dict] = [
                 {"role": "system", "content": _system_prompt()},
-                {"role": "user", "content": _user_message(url, description, spec_prefix, str(output_dir), pages)},
+                {"role": "user", "content": _user_message(url, description, spec_prefix, str(output_dir), pages, max_scenarios_per_file)},
             ]
 
             start = time.monotonic()
@@ -198,6 +216,8 @@ async def run_analysis(
                     response = complete(config, messages, tools=all_tools, max_tokens=4096, _usage=usage)
                 except Exception as e:
                     console.print(f"[red]LLM error on turn {turn}: {e}[/red]")
+                    if sink:
+                        sink.emit(f"LLM error on turn {turn}: {e}")
                     break
 
                 choice = response.choices[0]
@@ -227,6 +247,8 @@ async def run_analysis(
                     if name == "write_feature_file":
                         filename = Path(args.get("filename", f"file_{turn}.feature")).name
                         content = args.get("content", "")
+                        if max_scenarios_per_file and filename.endswith(".feature"):
+                            content = _truncate_gherkin(content, max_scenarios_per_file)
                         written_files[filename] = content
                         path = output_dir / filename
                         path.write_text(content, encoding="utf-8")
@@ -234,6 +256,9 @@ async def run_analysis(
                             f"  [dim green]→ write_feature_file({filename!r}, "
                             f"{len(content)} chars)[/dim green]"
                         )
+                        if sink:
+                            n_sc = len(re.findall(r'^\s*Scenario(?:\s+Outline)?:', content, re.MULTILINE))
+                            sink.emit(f"Writing {filename} ({n_sc} scenario{'s' if n_sc != 1 else ''})")
                         tool_results.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
@@ -246,6 +271,8 @@ async def run_analysis(
                             f"  [dim green]→ finish_analysis: "
                             f"{args.get('summary', '')[:120]}[/dim green]"
                         )
+                        if sink:
+                            sink.emit(f"Analysis complete: {args.get('summary', '')[:120]}")
                         tool_results.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
@@ -256,6 +283,10 @@ async def run_analysis(
                         # MCP browser tool
                         args_preview = json.dumps(args, ensure_ascii=False)[:120]
                         console.print(f"  [dim cyan]→ {name}({args_preview})[/dim cyan]")
+                        if sink:
+                            human = _humanize_tool_call(name, args)
+                            if human:
+                                sink.emit(human)
                         try:
                             mcp_result = await session.call_tool(name, args)
                             result_text = "\n".join(

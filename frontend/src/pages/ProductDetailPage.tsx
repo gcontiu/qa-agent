@@ -16,12 +16,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ArrowLeft, Play, Loader2, CheckCircle2, XCircle, FileText, ExternalLink } from 'lucide-react'
+import LogPanel from '@/components/LogPanel'
 
 const analyzeSchema = z.object({
   url: z.string().url('Must be a valid URL'),
   description: z.string().min(1, 'Required'),
   spec_prefix: z.string().min(1, 'Required').max(6),
   pages: z.string().optional(),
+  max_scenarios: z.string().optional(),
 })
 type AnalyzeForm = z.infer<typeof analyzeSchema>
 
@@ -84,11 +86,13 @@ export default function ProductDetailPage() {
 
   const analyze = useMutation({
     mutationFn: (data: AnalyzeForm) => {
+      const maxS = data.max_scenarios ? parseInt(data.max_scenarios, 10) : undefined
       const body = {
         url: data.url,
         description: data.description,
         spec_prefix: data.spec_prefix,
         pages: data.pages ? data.pages.split(',').map(p => p.trim()).filter(Boolean) : undefined,
+        max_scenarios: maxS && !isNaN(maxS) ? maxS : undefined,
       }
       return api.post<AnalyzeTask>(`/products/${id}/analyze`, body)
     },
@@ -164,6 +168,14 @@ export default function ProductDetailPage() {
             <Alert variant="destructive" className="mt-2">
               <AlertDescription>{task.error}</AlertDescription>
             </Alert>
+          )}
+          {taskId && (
+            <div className="mt-3">
+              <LogPanel
+                endpoint={`/products/${id}/analyze/${taskId}/logs`}
+                active={task.status === 'running'}
+              />
+            </div>
           )}
         </div>
       )}
@@ -253,6 +265,11 @@ export default function ProductDetailPage() {
                 <Label>Pages <span className="text-muted-foreground">(optional)</span></Label>
                 <Input {...register('pages')} placeholder="/,/about,/contact" />
                 <p className="text-xs text-muted-foreground">Comma-separated paths. Leave blank to crawl the whole site.</p>
+              </div>
+              <div className="space-y-1">
+                <Label>Max scenarios per page <span className="text-muted-foreground">(optional)</span></Label>
+                <Input {...register('max_scenarios')} type="number" min={1} className="w-28" placeholder="e.g. 3" />
+                <p className="text-xs text-muted-foreground">Hard cap on scenarios generated per feature file.</p>
               </div>
             </div>
             <DialogFooter className="mt-4">

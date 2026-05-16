@@ -7,6 +7,7 @@ Endpoints:
   GET  /products/{id}                         — get product
   POST /products/{id}/analyze                 — run analyst + save specs to DB (202 Accepted)
   GET  /products/{id}/analyze/{task_id}       — poll analysis status
+  GET  /products/{id}/analyze/{task_id}/logs  — cursor-based log stream (?since=N)
   GET  /products/{id}/specs                   — list specs for a product
   GET  /products/{id}/specs/{filename}        — get spec content
   PUT  /products/{id}/specs/{filename}        — create / update spec content
@@ -16,6 +17,7 @@ Endpoints:
   POST /runs                     — create a run; accepts spec_dir or product_id (202 Accepted)
   GET  /runs                     — list all runs (in-memory + disk)
   GET  /runs/{run_id}            — poll run status
+  GET  /runs/{run_id}/logs       — cursor-based log stream (?since=N)
   POST /runs/{run_id}/cancel     — cancel a pending/running run (202; 409 if already terminal)
   GET  /runs/{run_id}/report     — return report.json
   GET  /health                   — liveness probe (no auth required)
@@ -25,17 +27,23 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Body
-from fastapi.responses import FileResponse
+import jwt as pyjwt
+from fastapi import Depends, FastAPI, HTTPException, Body, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from qa_agent.agent import preflight_check, run_requirement
 from qa_agent.analyst import run_analysis
+from qa_agent.log_sink import BufferSink
 from qa_agent.auth import CurrentUser, get_current_user
 from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
@@ -46,7 +54,37 @@ from qa_agent.db import jobs as db_jobs
 from qa_agent.db import products as db_products
 from qa_agent.db import specs as db_specs
 
+def _rate_limit_key(request: Request) -> str:
+    """Rate-limit key: user UUID from JWT when available, fallback to client IP."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        secret = os.getenv("SUPABASE_JWT_SECRET", "")
+        if secret:
+            try:
+                payload = pyjwt.decode(
+                    auth[7:], secret, algorithms=["HS256"],
+                    options={"verify_aud": False},
+                )
+                sub = payload.get("sub", "")
+                if sub:
+                    return sub
+            except Exception:
+                pass
+    return get_remote_address(request)
+
+
+def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}. Please try again later."},
+    )
+
+
+limiter = Limiter(key_func=_rate_limit_key)
+
 app = FastAPI(title="qa-agent", version="0.1.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 _DEFAULT_REPORTS_DIR = Path("reports")
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -125,6 +163,7 @@ class AnalyzeRequest(BaseModel):
     description: str
     spec_prefix: str = "SC"
     pages: list[str] | None = None
+    max_scenarios: int | None = None
 
 
 class SpecUpdateRequest(BaseModel):
@@ -178,6 +217,8 @@ def _scenario_cap() -> int | None:
 
 async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
     state = _runs[run_id]
+    state["logs"] = []
+    sink = BufferSink(state["logs"])
     state["status"] = "running"
     _write_status_file(output_dir, run_id, state)
 
@@ -192,6 +233,7 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
             for filename, content in files.items():
                 (temp_dir / filename).write_text(content, encoding="utf-8")
             bundle = load_spec(temp_dir)
+            shutil.rmtree(temp_dir, ignore_errors=True)
         else:
             bundle = load_spec(Path(req.spec_dir))
         url = bundle.config.get_url(req.env)
@@ -229,20 +271,26 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
 
     scenario_delay = int(os.environ.get("QA_SCENARIO_DELAY", "3"))
 
+    n = len(requirements)
     results: list[dict] = []
     try:
         for i, req_item in enumerate(requirements):
             if i > 0 and scenario_delay > 0:
                 await asyncio.sleep(scenario_delay)
+            req_dict = req_item.to_executor_dict()
+            sink.emit(f"[{i+1}/{n}] {req_dict['id']} — {req_dict.get('title', '')[:60]}")
             result = await run_requirement(
-                req_item.to_executor_dict(), url, llm, context=bundle.config.context
+                req_dict, url, llm, context=bundle.config.context, sink=sink
             )
             results.append(result)
+            icon = "✓" if result.get("status") == "pass" else "✗"
+            sink.emit(f"[{i+1}/{n}] {icon} {result.get('status')} ({result.get('duration_s', 0):.1f}s)")
     except asyncio.CancelledError:
+        sink.emit(f"Cancelled after {len(results)}/{n} scenarios")
         state.update({
             "status": "cancelled",
             "completed_at": datetime.now(timezone.utc).isoformat(),
-            "error": f"Cancelled after {len(results)} of {len(requirements)} scenarios",
+            "error": f"Cancelled after {len(results)} of {n} scenarios",
         })
         _write_status_file(output_dir, run_id, state)
         raise
@@ -266,6 +314,7 @@ async def _execute_job(run_id: str, req: RunRequest, output_dir: Path) -> None:
     passed = sum(1 for r in results if r.get("status") == "pass")
     failed_count = sum(1 for r in results if r.get("status") == "fail")
     errored = sum(1 for r in results if r.get("status") == "error")
+    sink.emit(f"Done: {passed} passed, {failed_count} failed, {errored} errored")
 
     summary = {
         "total": len(results),
@@ -318,8 +367,21 @@ def _assert_run_owner(state: dict, user: CurrentUser, run_id: str) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/spec-dirs")
+async def list_spec_dirs(
+    user: CurrentUser = Depends(get_current_user),
+) -> list[str]:
+    """List subdirectories of the local specs/ folder, sorted alphabetically."""
+    specs_root = Path("specs")
+    if not specs_root.is_dir():
+        return []
+    return sorted(p.name for p in specs_root.iterdir() if p.is_dir())
+
+
 @app.post("/runs", response_model=RunStatus, status_code=202)
+@limiter.limit("10/hour")
 async def create_run(
+    request: Request,
     req: RunRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> RunStatus:
@@ -504,6 +566,8 @@ async def get_product(
 
 async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest) -> None:
     state = _analyses[task_id]
+    state["logs"] = []
+    sink = BufferSink(state["logs"])
     try:
         output_dir = _DEFAULT_REPORTS_DIR / "analyses" / task_id
         result = await run_analysis(
@@ -513,6 +577,8 @@ async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest)
             spec_prefix=req.spec_prefix,
             pages=req.pages,
             product_id=product_id,
+            max_scenarios_per_file=req.max_scenarios,
+            sink=sink,
         )
         state.update({
             "status": "done",
@@ -531,7 +597,9 @@ async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest)
 
 
 @app.post("/products/{product_id}/analyze", status_code=202)
+@limiter.limit("3/hour")
 async def analyze_product(
+    request: Request,
     product_id: str,
     req: AnalyzeRequest,
     user: CurrentUser = Depends(get_current_user),
@@ -567,6 +635,39 @@ async def get_analysis_task(
     if owner and owner != user.user_id:
         raise HTTPException(status_code=404, detail=f"Analysis task '{task_id}' not found")
     return state
+
+
+@app.get("/products/{product_id}/analyze/{task_id}/logs")
+async def get_analysis_logs(
+    product_id: str,
+    task_id: str,
+    since: int = 0,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Cursor-based log stream for an analysis task. Returns events[since:] + next cursor."""
+    state = _analyses.get(task_id)
+    if not state or state.get("product_id") != product_id:
+        raise HTTPException(status_code=404, detail=f"Analysis task '{task_id}' not found")
+    owner = state.get("user_id")
+    if owner and owner != user.user_id:
+        raise HTTPException(status_code=404, detail=f"Analysis task '{task_id}' not found")
+    logs: list = state.get("logs", [])
+    return {"events": logs[since:], "next": len(logs)}
+
+
+@app.get("/runs/{run_id}/logs")
+async def get_run_logs(
+    run_id: str,
+    since: int = 0,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Cursor-based log stream for an executor run. Returns events[since:] + next cursor."""
+    state = _runs.get(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    _assert_run_owner(state, user, run_id)
+    logs: list = state.get("logs", [])
+    return {"events": logs[since:], "next": len(logs)}
 
 
 # ---------------------------------------------------------------------------

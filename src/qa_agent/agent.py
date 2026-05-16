@@ -24,6 +24,7 @@ from rich.text import Text
 from qa_agent.llm import LLMConfig, complete, ensure_provider_running, _resolve_timeout, _TEST_TIMEOUT_DEFAULTS
 from qa_agent.llm.router import estimate_cost
 from qa_agent import browserbase
+from qa_agent.log_sink import LogSink, _humanize_tool_call
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
@@ -647,6 +648,7 @@ async def run_requirement(
     config: LLMConfig | None = None,
     test_timeout: int | None = ...,  # type: ignore[assignment]
     context: str = "",
+    sink: LogSink | None = None,
 ) -> dict:
     if config is None:
         config = LLMConfig.from_env(role="executor")
@@ -1116,6 +1118,10 @@ async def run_requirement(
 
                     args_preview = _esc_markup(json.dumps(args, ensure_ascii=False)[:100])
                     console.print(f"  [dim cyan]→ {name}({args_preview})[/dim cyan]")
+                    if sink:
+                        human = _humanize_tool_call(name, args)
+                        if human:
+                            sink.emit(human)
                     actions_log.append({"tool": name, "input": args})
 
                     mcp_result = await session.call_tool(name, args)

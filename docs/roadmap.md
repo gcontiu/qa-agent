@@ -150,6 +150,7 @@ Each item is deferred against a specific trigger. When the trigger fires, move i
 | **Tiered scenario caps (Free/Starter/Pro)** | Stripe is live; before that, single hardcoded global cap |
 | **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue |
 | **Auth into *target products*** (form login, OAuth, 2FA, KMS vault — Phase 3) | ≥ 30% of beta users request testing of authenticated pages; or first paying customer makes it a deal-breaker |
+| **Executor runs only approved specs** (`get_files_dict` filters `approved = true`) | First beta user complains that unapproved/draft specs reached the executor and produced misleading results; or approval workflow is confirmed as mandatory UX gate before launch |
 | **Retry logic + flaky-test badging** (Phase 4) | False-fail rate in production > 5%, measured over ≥ 100 runs |
 | **Browserbase Stealth Mode** (`proxies: true` + fingerprint) | First user reports consistent anti-bot blocks (Cloudflare, reCAPTCHA) preventing analyst/executor from accessing their site; or >10% of runs fail due to challenges. Current mitigation: `QA_SCENARIO_DELAY=3` between sessions reduces rate-based detection. |
 | **Self-hosted Playwright on Modal** | Browserbase spend > $1k/month |

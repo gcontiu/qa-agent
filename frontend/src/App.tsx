@@ -9,6 +9,7 @@ import ProductsPage from '@/pages/ProductsPage'
 import ProductDetailPage from '@/pages/ProductDetailPage'
 import SpecEditorPage from '@/pages/SpecEditorPage'
 import RunsPage from '@/pages/RunsPage'
+import RunDetailPage from '@/pages/RunDetailPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="/products/:id" element={<ProductDetailPage />} />
               <Route path="/products/:id/specs/*" element={<SpecEditorPage />} />
               <Route path="/runs" element={<RunsPage />} />
+              <Route path="/runs/:runId" element={<RunDetailPage />} />
               <Route path="/" element={<Navigate to="/products" replace />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

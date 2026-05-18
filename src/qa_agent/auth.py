@@ -9,25 +9,44 @@ Usage (in protected endpoints):
     async def endpoint(user: CurrentUser = Depends(get_current_user)):
         ...  # user.user_id, user.email available
 
-Local development (SUPABASE_JWT_SECRET not set):
+Local development (SUPABASE_URL not set):
     Returns a single dev user so the server works without Supabase configured.
     DATABASE_URL is also absent in that mode, so multi-tenancy is a no-op.
+
+Supabase issues ES256 tokens (ECDSA P-256). The public key is fetched once from
+the JWKS endpoint and cached in memory. No secret needed — only the public key.
 """
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from dataclasses import dataclass
 
-import jwt  # pyjwt
+import httpx
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt.algorithms import ECAlgorithm
 
 _bearer = HTTPBearer(auto_error=False)
 
-# Sentinel used when SUPABASE_JWT_SECRET is not set (local dev only).
 _DEV_USER_ID = "00000000-0000-0000-0000-000000000000"
 _DEV_USER_EMAIL = "dev@localhost"
+
+_cached_public_key = None
+
+
+def _public_key():
+    global _cached_public_key
+    if _cached_public_key is not None:
+        return _cached_public_key
+    supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
+    resp = httpx.get(f"{supabase_url}/auth/v1/.well-known/jwks.json", timeout=10)
+    resp.raise_for_status()
+    first_key = resp.json()["keys"][0]
+    _cached_public_key = ECAlgorithm.from_jwk(json.dumps(first_key))
+    return _cached_public_key
 
 
 @dataclass(frozen=True)
@@ -43,16 +62,15 @@ def get_current_user(
     FastAPI dependency: decode + validate the Supabase JWT.
 
     Token requirements:
-      - HS256 signed with SUPABASE_JWT_SECRET
+      - ES256 signed with Supabase project's EC key (fetched once from JWKS)
       - aud = "authenticated" (set by Supabase for all user sessions)
       - sub present (user UUID)
       - not expired
 
     Raises HTTP 401 if any check fails.
-    Falls back to dev user when SUPABASE_JWT_SECRET is unset.
+    Falls back to dev user when SUPABASE_URL is unset.
     """
-    secret = os.getenv("SUPABASE_JWT_SECRET")
-    if not secret:
+    if not os.getenv("SUPABASE_URL"):
         return CurrentUser(user_id=_DEV_USER_ID, email=_DEV_USER_EMAIL)
 
     if not credentials:
@@ -65,8 +83,8 @@ def get_current_user(
     try:
         payload = jwt.decode(
             credentials.credentials,
-            secret,
-            algorithms=["HS256"],
+            _public_key(),
+            algorithms=["ES256"],
             audience="authenticated",
         )
     except jwt.ExpiredSignatureError:

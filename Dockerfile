@@ -1,10 +1,8 @@
 FROM python:3.12-slim
 
-# Node 20 — required for npx @playwright/mcp and React build
+# Node 20 + npm — Debian trixie ships nodejs 20 natively, no nodesource needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates \
- && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
- && apt-get install -y nodejs \
+    nodejs npm \
  && rm -rf /var/lib/apt/lists/*
 
 # uv — fast Python package manager

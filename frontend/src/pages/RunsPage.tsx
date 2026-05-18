@@ -5,7 +5,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { api } from '@/lib/api'
-import type { Run } from '@/lib/types'
+import type { Run, Product } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -78,6 +78,12 @@ export default function RunsPage() {
     queryKey: ['spec-dirs'],
     queryFn: () => api.get('/spec-dirs'),
     enabled: newRunOpen,
+  })
+
+  const { data: products = [] } = useQuery<Product[]>({
+    queryKey: ['products'],
+    queryFn: () => api.get('/products'),
+    enabled: newRunOpen && sourceMode === 'product',
   })
 
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<RunForm>({
@@ -206,10 +212,25 @@ export default function RunsPage() {
               {/* source-specific field */}
               {sourceMode === 'product' ? (
                 <div className="space-y-1">
-                  <Label>Product ID</Label>
-                  <Input
-                    {...register('product_id' as never)}
-                    placeholder="UUID of the product"
+                  <Label>Product</Label>
+                  <Controller
+                    name={'product_id' as never}
+                    control={control}
+                    render={({ field }) => (
+                      <Select onValueChange={field.onChange} value={field.value as string}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={products.length === 0 ? 'No products found' : 'Select a product…'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {products.map(p => (
+                            <SelectItem key={p.id} value={p.id}>
+                              <span>{p.name}</span>
+                              <span className="ml-2 text-muted-foreground text-xs">{p.url}</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   />
                   {'product_id' in errors && errors.product_id && (
                     <p className="text-xs text-destructive">{errors.product_id.message as string}</p>

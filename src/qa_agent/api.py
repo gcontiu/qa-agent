@@ -53,6 +53,8 @@ from qa_agent.db import init as db_init, close as db_close
 from qa_agent.db import jobs as db_jobs
 from qa_agent.db import products as db_products
 from qa_agent.db import specs as db_specs
+from qa_agent.db import issues as db_issues
+from qa_agent.issues import BufferingIssueSink
 
 def _rate_limit_key(request: Request) -> str:
     """Rate-limit key: user UUID from JWT when available, fallback to client IP."""
@@ -568,6 +570,7 @@ async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest)
     state = _analyses[task_id]
     state["logs"] = []
     sink = BufferSink(state["logs"])
+    issues_sink = BufferingIssueSink()
     try:
         output_dir = _DEFAULT_REPORTS_DIR / "analyses" / task_id
         result = await run_analysis(
@@ -579,6 +582,7 @@ async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest)
             product_id=product_id,
             max_scenarios_per_file=req.max_scenarios,
             sink=sink,
+            issues_sink=issues_sink,
         )
         state.update({
             "status": "done",
@@ -587,6 +591,7 @@ async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest)
             "file_count": result["file_count"],
             "summary": result["summary"],
             "cost_usd": result.get("cost_usd"),
+            "issues_count": result.get("issues_count", 0),
         })
     except Exception as e:
         state.update({
@@ -740,6 +745,55 @@ async def approve_spec(
     if not updated:
         raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")
     return await db_specs.get_by_filename(product_id, filename)
+
+
+# ---------------------------------------------------------------------------
+# Issues
+# ---------------------------------------------------------------------------
+
+class IssueStatusUpdate(BaseModel):
+    status: Literal["open", "acknowledged", "wont_fix", "resolved"]
+
+
+@app.get("/products/{product_id}/issues")
+async def list_issues(
+    product_id: str,
+    status: str | None = None,
+    severity: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    """List issues found during analyst crawls for a product."""
+    await _get_owned_product(product_id, user)
+    return await db_issues.list_by_product(product_id, status=status, severity=severity)
+
+
+@app.get("/products/{product_id}/issues/summary")
+async def get_issues_summary(
+    product_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Return count of open issues by severity."""
+    await _get_owned_product(product_id, user)
+    return await db_issues.summary(product_id)
+
+
+@app.patch("/products/{product_id}/issues/{issue_id}")
+async def update_issue_status(
+    product_id: str,
+    issue_id: str,
+    req: IssueStatusUpdate,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Update issue status (acknowledge, mark won't-fix, resolve)."""
+    await _get_owned_product(product_id, user)
+    updated = await db_issues.update_status(product_id, issue_id, req.status)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Issue '{issue_id}' not found")
+    issues = await db_issues.list_by_product(product_id)
+    for issue in issues:
+        if issue["id"] == issue_id:
+            return issue
+    raise HTTPException(status_code=404, detail=f"Issue '{issue_id}' not found")
 
 
 # ---------------------------------------------------------------------------

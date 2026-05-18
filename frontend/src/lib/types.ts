@@ -38,6 +38,28 @@ export interface RunSummary {
   errored: number
 }
 
+export interface Issue {
+  id: string
+  product_id: string
+  fingerprint: string
+  type: 'console_error' | 'console_warning' | 'network_5xx' | 'network_4xx' | 'broken_link' | 'flow_stuck' | 'semantic'
+  severity: 'high' | 'medium' | 'low'
+  url: string
+  message: string
+  details: Record<string, unknown>
+  status: 'open' | 'acknowledged' | 'wont_fix' | 'resolved'
+  first_seen_at: string
+  last_seen_at: string
+  occurrences: number
+}
+
+export interface IssuesSummary {
+  total: number
+  high: number
+  medium: number
+  low: number
+}
+
 export interface Run {
   run_id: string
   status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled'

@@ -583,6 +583,64 @@ A single reusable `<LogPanel endpoint="..." active={bool} />` component is used 
 
 ---
 
+## Issue Detection
+
+### What it does
+
+During every analyst crawl, two independent collectors surface real problems found on the site — before any scenario is written or executed.
+
+**Deterministic scanner** (zero LLM cost): After each `browser_navigate` call, the analyst invokes `browser_console_messages` and `browser_network_requests` MCP tools directly (results never sent to LLM). The `DeterministicScanner` parses the text and emits typed `Issue` objects for JS errors, 4xx/5xx responses, and broken links. Gracefully degrades if the tools are absent in the Playwright MCP version in use.
+
+**Semantic issues** (LLM-reported): A custom `report_issue(url, severity, message, expected?, actual?)` tool is available to the analyst LLM. It calls this when it observes a broken flow, unresponsive button, or UX defect during navigation. These are labeled `type: "semantic"`.
+
+### Deduplication
+
+Issues are keyed on a 12-character `fingerprint = sha1(type:normalized_url:message[:120])`. Normalisation strips query strings and replaces UUIDs/numeric IDs — the same JS error across multiple pages is one issue, not N. On re-run, the row is upserted: `last_seen_at` advances, `occurrences` increments, severity escalates if higher. User-set status (`acknowledged`, `wont_fix`) is preserved.
+
+### Data model
+
+```
+issues table (Postgres)
+  product_id   → FK products.id
+  fingerprint  → dedup key  (UNIQUE with product_id)
+  type         → console_error | network_5xx | network_4xx | broken_link | flow_stuck | semantic
+  severity     → high | medium | low
+  url          → page where found
+  message      → concise description
+  details      → JSONB: raw console line, HTTP status, expected/actual
+  status       → open | acknowledged | wont_fix | resolved
+  occurrences  → incremented per analyst re-run
+  first/last_seen_at
+```
+
+### API surface
+
+```
+GET  /products/{id}/issues           → list issues (?status=open&severity=high)
+GET  /products/{id}/issues/summary   → {total, high, medium, low} counts for open issues
+PATCH /products/{id}/issues/{id}     → {status: "acknowledged"|"wont_fix"|"resolved"|"open"}
+```
+
+### UI
+
+`IssuesPanel` renders below the Specs section on `ProductDetailPage`. It is hidden when `summary.total === 0` (no analyst run yet, or clean site). Issues are grouped by severity (high → medium → low) and expand to show raw details + status actions. A toggle switches between "Open" and "All" views.
+
+### Files added / modified
+
+| File | Change |
+|---|---|
+| `src/qa_agent/issues.py` | New — `Issue` dataclass, `IssueSink` protocol, `BufferingIssueSink`, `DeterministicScanner` |
+| `src/qa_agent/db/issues.py` | New — `bulk_upsert`, `list_by_product`, `update_status`, `summary` |
+| `src/qa_agent/db/schema.sql` | Additive: `issues` table + RLS policy |
+| `src/qa_agent/analyst.py` | `report_issue` tool + `DeterministicScanner` integration + `issues_sink` param |
+| `src/qa_agent/api.py` | Wire `BufferingIssueSink` in `_run_analysis_task`; 3 new endpoints |
+| `frontend/src/lib/types.ts` | `Issue` + `IssuesSummary` types |
+| `frontend/src/components/IssuesPanel.tsx` | New — issue list with severity badges + status actions |
+| `frontend/src/pages/ProductDetailPage.tsx` | Integrate `<IssuesPanel>`; invalidate on analysis done |
+| `frontend/src/lib/api.ts` | Add `api.patch()` method |
+
+---
+
 ## Output Contract
 
 Per-run artifacts under `reports/run-<ISO-timestamp>/`:

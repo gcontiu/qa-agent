@@ -26,6 +26,9 @@ from qa_agent.agent import _make_server_params
 from qa_agent import browserbase
 from qa_agent.llm import LLMConfig, complete, ensure_provider_running, estimate_cost
 from qa_agent.log_sink import LogSink, _humanize_tool_call
+from qa_agent.issues import (
+    BufferingIssueSink, DeterministicScanner, Issue, IssueSink, issues_to_dicts,
+)
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 MAX_TURNS = 50  # Analyst needs more turns to crawl a full site
@@ -80,6 +83,47 @@ _FINISH_TOOL: dict = {
                 },
             },
             "required": ["summary", "file_count"],
+        },
+    },
+}
+
+_REPORT_ISSUE_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "report_issue",
+        "description": (
+            "Report a UX or functional problem you observe during exploration. "
+            "Use for things like: a button that does nothing when clicked, a form "
+            "that shows a generic error, a page that never finishes loading, or "
+            "broken layouts. Do NOT use for JavaScript console errors or HTTP failures "
+            "— those are captured automatically."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The page URL where the issue was observed.",
+                },
+                "severity": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low"],
+                    "description": "high = blocks core user flow; medium = degrades UX; low = cosmetic.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Concise description of the problem (max 200 chars).",
+                },
+                "expected": {
+                    "type": "string",
+                    "description": "What should have happened.",
+                },
+                "actual": {
+                    "type": "string",
+                    "description": "What actually happened.",
+                },
+            },
+            "required": ["url", "severity", "message"],
         },
     },
 }
@@ -143,6 +187,7 @@ async def run_analysis(
     product_id: str | None = None,
     max_scenarios_per_file: int | None = None,
     sink: LogSink | None = None,
+    issues_sink: IssueSink | None = None,
 ) -> dict:
     """
     Crawl a product site and generate Gherkin feature files.
@@ -189,6 +234,7 @@ async def run_analysis(
             await session.initialize()
 
             mcp_tools = await session.list_tools()
+            available_tool_names = {t.name for t in mcp_tools.tools}
             browser_tools = [
                 {
                     "type": "function",
@@ -199,10 +245,18 @@ async def run_analysis(
                     },
                 }
                 for t in mcp_tools.tools
+                # Keep diagnostic tools for LLM visibility but exclude from standard flow
+                if t.name not in ("browser_console_messages", "browser_network_requests")
             ]
             # Analyst always uses full tool set — local models not recommended for this role
-            all_tools = browser_tools + [_WRITE_TOOL, _FINISH_TOOL]
-            console.print(f"[dim]Browser tools: {len(browser_tools)} + 2 analyst tools[/dim]\n")
+            all_tools = browser_tools + [_WRITE_TOOL, _FINISH_TOOL, _REPORT_ISSUE_TOOL]
+            console.print(f"[dim]Browser tools: {len(browser_tools)} + 3 analyst tools[/dim]\n")
+
+            scanner = DeterministicScanner()
+            # Track whether diagnostic MCP tools are available (graceful degradation)
+            _has_console_tool = "browser_console_messages" in available_tool_names
+            _has_network_tool = "browser_network_requests" in available_tool_names
+            _current_url = url
 
             messages: list[dict] = [
                 {"role": "system", "content": _system_prompt()},
@@ -279,6 +333,22 @@ async def run_analysis(
                             "content": "Analysis complete. Files will now be written to disk.",
                         })
 
+                    elif name == "report_issue":
+                        issue = DeterministicScanner.from_report_issue_args(_current_url, args)
+                        if issues_sink:
+                            issues_sink.add(issue)
+                        msg_preview = args.get("message", "")[:60]
+                        console.print(
+                            f"  [dim yellow]→ report_issue({issue.severity}: {msg_preview})[/dim yellow]"
+                        )
+                        if sink:
+                            sink.emit(f"Issue found: {msg_preview} [{issue.severity}]")
+                        tool_results.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": "Issue recorded.",
+                        })
+
                     else:
                         # MCP browser tool
                         args_preview = json.dumps(args, ensure_ascii=False)[:120]
@@ -294,6 +364,26 @@ async def run_analysis(
                             )
                         except Exception as e:
                             result_text = f"Tool error: {e}"
+
+                        # After navigation: run deterministic issue scanner
+                        if name == "browser_navigate" and issues_sink:
+                            nav_url = args.get("url", _current_url)
+                            _current_url = nav_url
+                            if _has_console_tool:
+                                try:
+                                    cr = await session.call_tool("browser_console_messages", {})
+                                    ct = "\n".join(c.text for c in cr.content if hasattr(c, "text"))
+                                    scanner.ingest_console(nav_url, ct, issues_sink)
+                                except Exception:
+                                    pass
+                            if _has_network_tool:
+                                try:
+                                    nr = await session.call_tool("browser_network_requests", {})
+                                    nt = "\n".join(c.text for c in nr.content if hasattr(c, "text"))
+                                    scanner.ingest_network(nav_url, nt, issues_sink)
+                                except Exception:
+                                    pass
+
                         tool_results.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
@@ -308,13 +398,22 @@ async def run_analysis(
     if bb_session_id:
         browserbase.delete_session(bb_session_id)
 
-    if product_id and written_files:
+    issues_list: list[Issue] = []
+    if issues_sink and isinstance(issues_sink, BufferingIssueSink):
+        issues_list = issues_sink.finalize()
+
+    if product_id:
         from qa_agent.db import is_configured
         from qa_agent.db import specs as db_specs
+        from qa_agent.db import issues as db_issues
         if is_configured():
-            for filename, content in written_files.items():
-                await db_specs.upsert(product_id, filename, content)
-            console.print(f"[dim]DB: {len(written_files)} spec(s) saved for product {product_id}[/dim]")
+            if written_files:
+                for filename, content in written_files.items():
+                    await db_specs.upsert(product_id, filename, content)
+                console.print(f"[dim]DB: {len(written_files)} spec(s) saved for product {product_id}[/dim]")
+            if issues_list:
+                await db_issues.bulk_upsert(product_id, issues_to_dicts(issues_list))
+                console.print(f"[dim]DB: {len(issues_list)} issue(s) saved for product {product_id}[/dim]")
 
     console.print()
     for filename in written_files:
@@ -367,6 +466,7 @@ async def run_analysis(
         "scoped_pages": pages,
         "tokens": usage,
         "cost_usd": cost,
+        "issues_count": len(issues_list),
     }
 
 

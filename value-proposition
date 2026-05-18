@@ -1,0 +1,117 @@
+# Value Proposition — QA Agent
+
+## Ce este
+
+Un agent AI care navighează site-ul tău ca un utilizator real, găsește probleme tehnice în timp real
+și generează o suită de teste regression care rulează la fiecare deploy — fără nicio linie de cod
+scrisă de tine.
+
+Două etape:
+
+1. **Analyst** (~$1.40 / run) — crawlează site-ul, generează scenarii Gherkin și un raport de
+   probleme descoperite (erori JS, 404/500, flow-uri blocate).
+2. **Executor** (~$1.50 / run) — rulează scenariile și raportează ce trece și ce pică.
+
+---
+
+## Ce se întâmplă tehnic pe site-ul lor
+
+- Un browser Chromium headless navighează paginile automat.
+- Agentul citește structura paginii via accessibility tree — același lucru pe care îl citesc
+  screen reader-urile.
+- Execută acțiuni reale: click, typing, navigare — nu simulări.
+- Fiecare scenariu rulează într-o sesiune izolată, fără stare partajată.
+- Nu stochează date de pe site, nu modifică nimic în baza de date (dacă spec-ul nu prevede
+  explicit asta).
+- Generează ~2–5 request-uri HTTP per scenariu (navigate + acțiuni).
+- Durata: 15–60 secunde per scenariu, în funcție de complexitate.
+
+---
+
+## Ce trebuie să furnizeze
+
+- URL-ul site-ului (producție, staging sau local).
+- O descriere scurtă a produsului (1–2 fraze).
+- Opțional: credențiale de test dacă site-ul are autentificare.
+
+Nu este nevoie de specificații scrise în prealabil — analyst-ul le generează automat.
+
+---
+
+## Ce primesc
+
+### De la Analyst
+- **issues.json** — lista de probleme descoperite în crawl:
+  erori JavaScript critice, endpoint-uri 4xx/5xx, link-uri rupte, flow-uri blocate.
+- **Scenarii Gherkin** — suita de teste regression, gata de folosit imediat sau după aprobare.
+
+### De la Executor
+- **report.md** — raport în limbaj natural: ce a trecut, ce a picat, ce a văzut agentul exact.
+- **report.json** — date structurate consumabile de alte sisteme (CI/CD, fix-agent).
+- Per scenariu: verdict + reasoning + secvența de acțiuni executate.
+
+---
+
+## Value proposition
+
+### 1. Audit imediat fără efort
+În 5 minute știi dacă există erori JavaScript critice, endpoint-uri care returnează 500 sau
+flow-uri care nu se mai închid — fără să fi scris un singur test în prealabil.
+
+### 2. QA fără efort de mentenanță
+Testele tradiționale (Selenium, Cypress) se sparg la orice redesign — un buton redenumit, un
+selector schimbat, și suita de teste pică. Agentul citește accessibility tree și înțelege
+"butonul Shop" indiferent de cum arată DOM-ul. Spec-ul rămâne valid ani de zile.
+
+### 3. Documentație care se testează singură
+Scenariile sunt simultan documentația produsului ȘI testele automate. Nu există divergență
+între "ce am zis că face" și "ce testăm efectiv".
+
+### 4. Feedback imediat după fiecare deploy
+Rulezi executorul în pipeline-ul de CI/CD. În 5–10 minute știi dacă noul deploy a spart ceva.
+
+### 5. Rapoarte acționabile, nu doar roșu/verde
+Raportul nu spune doar "SC-003 FAIL". Spune: "după click pe Adaugă în coș, în loc de
+confirmation modal a apărut un mesaj de eroare «Connection timeout»". Un fix-agent poate
+consuma acest raport și propune un patch direct în cod.
+
+### 6. Fără setup pe infrastructura lor
+Rulează în cloud, pe browserul nostru. Ei nu instalează nimic, nu expun nimic. Furnizează
+URL-ul, primesc raportul.
+
+---
+
+## Limitări de comunicat clar
+
+- **Probabilistic, nu determinist** — un LLM poate interpreta diferit un scenariu ambiguu.
+  Scenariile generate de analyst trebuie revizuite înainte de rularea în producție.
+- **Vizibilitate browser, nu backend** — nu testează logică server-side, race conditions,
+  calcule interne sau integrări externe care nu au manifestare în UI.
+- **Autentificarea necesită setup** — dacă site-ul are login, trebuie configurate credențiale
+  de test (nu de producție) înainte de prima rulare.
+- **Acoperă flows cunoscute, nu explorare arbitrară** — analyst-ul urmează link-uri vizibile,
+  nu ghicește URL-uri ascunse sau API-uri nedocumentate.
+- **Nu înlocuiește testarea manuală exploratorie** — acoperă scenarii definite, nu descoperă
+  clase noi de bug-uri prin fuzzing sau edge cases nespecificate.
+
+---
+
+## Cum arată un ciclu complet
+
+```
+URL + descriere
+      │
+      ▼
+   Analyst (~5 min, ~$1.40)
+      │
+      ├─→ issues.json   ← erori critice găsite acum
+      └─→ .feature files
+              │
+              ▼  (opțional: user revizuiește și aprobă)
+           Executor (~10 min, ~$1.50)
+              │
+              ├─→ report.md / report.json
+              └─→ CI badge: 42/47 passed
+```
+
+Cost per ciclu complet: ~$3. La $49/lună (Starter), poți rula ~16 cicluri complete pe lună.

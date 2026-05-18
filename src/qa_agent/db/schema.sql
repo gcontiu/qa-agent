@@ -97,6 +97,41 @@ CREATE INDEX IF NOT EXISTS jobs_status_idx      ON jobs (status) WHERE status IN
 CREATE INDEX IF NOT EXISTS jobs_product_id_idx  ON jobs (product_id);
 
 -- ---------------------------------------------------------------------------
+-- issues
+-- Technical problems discovered during analyst crawl.
+-- Upserted by (product_id, fingerprint) — same issue across multiple runs
+-- increments occurrences rather than creating a new row.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS issues (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id      UUID        REFERENCES products(id) ON DELETE CASCADE,
+    fingerprint     TEXT        NOT NULL,
+    type            TEXT        NOT NULL,
+    severity        TEXT        NOT NULL  CHECK (severity IN ('high','medium','low')),
+    url             TEXT        NOT NULL,
+    message         TEXT        NOT NULL,
+    details         JSONB       NOT NULL DEFAULT '{}',
+    status          TEXT        NOT NULL DEFAULT 'open'
+                                CHECK (status IN ('open','acknowledged','wont_fix','resolved')),
+    first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    occurrences     INTEGER     NOT NULL DEFAULT 1,
+    UNIQUE (product_id, fingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS issues_product_status_idx
+    ON issues (product_id, status, severity);
+
+ALTER TABLE issues ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users_own_issues" ON issues;
+CREATE POLICY "users_own_issues" ON issues
+    FOR ALL USING (
+        product_id IN (
+            SELECT id FROM products WHERE user_id = auth.uid()
+        )
+    );
+
+-- ---------------------------------------------------------------------------
 -- Trigger: auto-update specs.updated_at
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION set_updated_at()

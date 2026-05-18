@@ -17,6 +17,7 @@ import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ArrowLeft, Play, Loader2, CheckCircle2, XCircle, FileText, ExternalLink } from 'lucide-react'
 import LogPanel from '@/components/LogPanel'
+import IssuesPanel from '@/components/IssuesPanel'
 
 const analyzeSchema = z.object({
   url: z.string().url('Must be a valid URL'),
@@ -74,9 +75,11 @@ export default function ProductDetailPage() {
     gcTime: 0,
   })
 
-  // Invalidate specs once analysis completes
+  // Invalidate specs + issues once analysis completes
   if (task?.status === 'done' && taskId) {
     qc.invalidateQueries({ queryKey: ['specs', id] })
+    qc.invalidateQueries({ queryKey: ['issues', id] })
+    qc.invalidateQueries({ queryKey: ['issues-summary', id] })
   }
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<AnalyzeForm>({
@@ -231,6 +234,13 @@ export default function ProductDetailPage() {
             </TableBody>
           </Table>
         </div>
+      )}
+
+      {id && (
+        <>
+          <Separator className="my-6" />
+          <IssuesPanel productId={id} />
+        </>
       )}
 
       {/* Analyze dialog */}

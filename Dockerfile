@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # Node 20 + npm — Debian trixie ships nodejs 20 natively, no nodesource needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs npm \
+    ca-certificates nodejs npm \
  && rm -rf /var/lib/apt/lists/*
 
 # uv — fast Python package manager

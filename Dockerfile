@@ -26,7 +26,8 @@ RUN npm install -g @playwright/mcp@0.0.75
 # Browserbase instead (requires QA_BROWSERBASE_API_KEY + QA_BROWSERBASE_PROJECT_ID).
 ARG INSTALL_CHROMIUM=true
 RUN if [ "$INSTALL_CHROMIUM" = "true" ]; then \
-    npx playwright install --with-deps chromium; \
+    npx -y playwright install-deps chromium && \
+    npx @playwright/mcp install-browser chromium; \
     fi
 
 # Step 2: build React frontend (Node is already present above).

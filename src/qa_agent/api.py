@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -395,9 +396,10 @@ async def create_run(
         product = await db_products.get(req.product_id, user_id=user.user_id)
         if not product:
             raise HTTPException(status_code=404, detail=f"Product '{req.product_id}' not found")
-        slug = product["name"].lower().replace(" ", "-")
+        raw_slug = product["name"].lower()
     else:
-        slug = Path(req.spec_dir).name.lower()
+        raw_slug = Path(req.spec_dir).name.lower()
+    slug = re.sub(r'[^a-z0-9]+', '-', raw_slug).strip('-') or "run"
     run_id = f"{slug}-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}"
     output_dir = Path(req.output)
     spec_key = req.spec_dir or f"product:{req.product_id}"

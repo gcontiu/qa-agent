@@ -123,7 +123,7 @@ export default function RunsPage() {
       qc.invalidateQueries({ queryKey: ['runs'] })
       setNewRunOpen(false)
       reset()
-      navigate(`/runs/${run.run_id}`)
+      navigate(`/runs/${encodeURIComponent(run.run_id)}`)
     },
   })
 
@@ -158,7 +158,7 @@ export default function RunsPage() {
                 <TableRow
                   key={run.run_id}
                   className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/runs/${run.run_id}`)}
+                  onClick={() => navigate(`/runs/${encodeURIComponent(run.run_id)}`)}
                 >
                   <TableCell className="font-mono text-sm">{run.run_id}</TableCell>
                   <TableCell><RunStatusBadge status={run.status} /></TableCell>

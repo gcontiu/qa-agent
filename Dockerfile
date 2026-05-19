@@ -21,10 +21,10 @@ RUN uv sync --no-dev --no-install-project \
 # Pre-install @playwright/mcp globally so npx finds it without a network fetch.
 RUN npm install -g @playwright/mcp@0.0.75
 
-# Optional: install Chromium for local Docker testing (without Browserbase).
-# Fly.io deploy uses Browserbase (QA_BROWSER=browserbase in fly.toml).
-# Usage: docker build --build-arg INSTALL_CHROMIUM=true -t qa-agent-local .
-ARG INSTALL_CHROMIUM=false
+# Install Chromium for local Playwright (used in Fly.io deploy and local Docker).
+# Set INSTALL_CHROMIUM=false to skip if you want a smaller image and use
+# Browserbase instead (requires QA_BROWSERBASE_API_KEY + QA_BROWSERBASE_PROJECT_ID).
+ARG INSTALL_CHROMIUM=true
 RUN if [ "$INSTALL_CHROMIUM" = "true" ]; then \
     npx playwright install --with-deps chromium; \
     fi

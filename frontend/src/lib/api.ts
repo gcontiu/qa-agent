@@ -12,6 +12,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (_token) headers['Authorization'] = `Bearer ${_token}`
 
   const res = await fetch(path, { ...init, headers })
+  if (res.status === 401) {
+    setToken(null)
+    window.location.replace('/login')
+    throw new Error('Session expired')
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
     throw new Error(`${res.status} ${text}`)

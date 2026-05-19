@@ -13,6 +13,10 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import type { ComponentProps } from 'react'
+
+// modal prop exists in Radix but is missing from shadcn's re-exported types
+const SelectInDialog = Select as React.ComponentType<ComponentProps<typeof Select> & { modal?: boolean }>
 import { Play, Loader2, CheckCircle2, XCircle, Clock, Ban } from 'lucide-react'
 
 // ── source mode toggle ────────────────────────────────────────────────────────
@@ -217,7 +221,7 @@ export default function RunsPage() {
                     name={'product_id' as never}
                     control={control}
                     render={({ field }) => (
-                      <Select onValueChange={field.onChange} value={field.value as string}>
+                      <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value as string}>
                         <SelectTrigger>
                           <SelectValue placeholder={products.length === 0 ? 'No products found' : 'Select a product…'} />
                         </SelectTrigger>
@@ -229,7 +233,7 @@ export default function RunsPage() {
                             </SelectItem>
                           ))}
                         </SelectContent>
-                      </Select>
+                      </SelectInDialog>
                     )}
                   />
                   {'product_id' in errors && errors.product_id && (
@@ -243,7 +247,7 @@ export default function RunsPage() {
                     name={'spec_dir' as never}
                     control={control}
                     render={({ field }) => (
-                      <Select onValueChange={field.onChange} value={field.value as string}>
+                      <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value as string}>
                         <SelectTrigger>
                           <SelectValue placeholder={specDirs.length === 0 ? 'No spec dirs found' : 'Select a spec directory…'} />
                         </SelectTrigger>
@@ -252,7 +256,7 @@ export default function RunsPage() {
                             <SelectItem key={d} value={d}>{d}</SelectItem>
                           ))}
                         </SelectContent>
-                      </Select>
+                      </SelectInDialog>
                     )}
                   />
                   {'spec_dir' in errors && errors.spec_dir && (
@@ -263,7 +267,30 @@ export default function RunsPage() {
 
               <div className="space-y-1">
                 <Label>Executor model <span className="text-muted-foreground">(optional)</span></Label>
-                <Input {...register('executor_model')} placeholder="e.g. claude-haiku-4-5-20251001" />
+                <Controller
+                  name={'executor_model' as never}
+                  control={control}
+                  render={({ field }) => (
+                    <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value as string}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Default (Haiku — fastest, cheapest)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="claude-haiku-4-5-20251001">
+                          Haiku
+                        </SelectItem>
+                        <SelectItem value="claude-sonnet-4-6" disabled>
+                          <span className="text-muted-foreground">Sonnet</span>
+                          <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-muted text-muted-foreground">Pro</span>
+                        </SelectItem>
+                        <SelectItem value="claude-opus-4-7" disabled>
+                          <span className="text-muted-foreground">Opus</span>
+                          <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-muted text-muted-foreground">Pro</span>
+                        </SelectItem>
+                      </SelectContent>
+                    </SelectInDialog>
+                  )}
+                />
               </div>
               <div className="space-y-1">
                 <Label>Max scenarios <span className="text-muted-foreground">(optional)</span></Label>

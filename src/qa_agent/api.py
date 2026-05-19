@@ -31,7 +31,7 @@ import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import jwt as pyjwt
 from fastapi import Depends, FastAPI, HTTPException, Body, Request
@@ -91,6 +91,27 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 
 _DEFAULT_REPORTS_DIR = Path("reports")
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
+
+_SPA_ROUTE_PREFIXES = ("/products", "/runs", "/login")
+
+@app.middleware("http")
+async def _spa_html_middleware(request: Request, call_next: Any) -> Any:
+    """Serve index.html for browser navigations to React Router paths.
+
+    Hard-refreshing /runs or /products would otherwise hit the FastAPI JSON
+    endpoints (same paths) before the React app loads. Browser navigations
+    send Accept: text/html explicitly; fetch() calls send Accept: */* which
+    does not contain the literal string 'text/html'.
+    """
+    accept = request.headers.get("accept", "")
+    path = request.url.path
+    is_browser_nav = request.method == "GET" and "text/html" in accept
+    is_spa_route = path == "/" or any(
+        path == p or path.startswith(p + "/") for p in _SPA_ROUTE_PREFIXES
+    )
+    if is_browser_nav and is_spa_route and _FRONTEND_DIR.exists():
+        return FileResponse(_FRONTEND_DIR / "index.html")
+    return await call_next(request)
 _STATE_DB = Path("reports/.state/runs.db")
 
 _assets_dir = _FRONTEND_DIR / "assets"

@@ -2,9 +2,9 @@
 
 Strategic plan for transitioning qa-agent from a local CLI tool to a hosted SaaS where users authenticate, configure their products (including auth), and run automated test suites. Captures phased deliverables, open decisions, cost projections, and risk register.
 
-> **Status:** CLI mature; Phase 0.5 complete; Step 6 complete (Supabase Auth + multitenancy + minimal sign-in UI deployed on Fly.io); Step 7 (React+Vite dashboard) is next.
+> **Status:** Phase 2 MVP complete for closed beta. Steps 1–11 done: Supabase Auth (ES256/JWKS), multitenancy, React+Vite dashboard, spec viewer/editor, LogSink streaming, issue detection — all deployed on Fly.io with local Chromium. Tier structure finalized (BD-004). Next: closed beta (5–10 users), then Stripe + per-tier enforcement.
 >
-> **Last updated:** 2026-05-15
+> **Last updated:** 2026-05-19
 
 ---
 
@@ -77,7 +77,7 @@ The key strategic insight: **don't self-host LLMs**. Inference APIs (Anthropic; 
 | Analyst evidence-only prompt | ✓ Done |
 | Analyst write-on-each-call (no data loss on timeout) | ✓ Done |
 | Validation on alconind.ro v2 | ✓ Done (71% pass, $0.78) |
-| Validation on a 2nd site | ⚠ Pending — Phase 1 prereq |
+| Validation on a 2nd site | ⚠ Partial — analyst confirmed on diy.com (B&Q); executor ran 1 scenario but hit anti-bot soft-block. Pipeline mechanics confirmed; full suite validation deferred (see anti-bot strategy notes). |
 
 **Result:** $10 → $0.78 per 73-scenario run (~92% reduction). Analyst confirmed evidence-based on alconind.ro.
 
@@ -148,7 +148,7 @@ Each item is deferred against a specific trigger. When the trigger fires, move i
 | **`.specs/` temp dir cleanup + volume reduction** | Before Phase 2 public launch. See note below. |
 | **Stripe billing + tiered plans** | Closed beta validates retention ≥ 30% week-2; until then, manual invoicing for paid users |
 | **Tiered scenario caps (Free/Starter/Pro)** | Stripe is live; before that, single hardcoded global cap |
-| **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue |
+| **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue. Design finalized in BD-004 — Starter+BYOK=$29, Pro+BYOK=$79, Free has no BYOK. Implementation shares KMS encryption with Phase 3 auth credentials; build together, not separately. |
 | **Auth into *target products*** (form login, OAuth, 2FA, KMS vault — Phase 3) | ≥ 30% of beta users request testing of authenticated pages; or first paying customer makes it a deal-breaker |
 | **Executor runs only approved specs** (`get_files_dict` filters `approved = true`) | First beta user complains that unapproved/draft specs reached the executor and produced misleading results; or approval workflow is confirmed as mandatory UX gate before launch |
 | **Retry logic + flaky-test badging** (Phase 4) | False-fail rate in production > 5%, measured over ≥ 100 runs |
@@ -220,21 +220,25 @@ When a run is triggered with `product_id`, specs are materialized from Supabase 
 
 ## Multi-provider LLM strategy
 
-### Recommended tier mapping (post-2026-05-11 validation)
+### Recommended tier mapping (finalized 2026-05-19 — BD-004)
 
-| Tier | LLM Provider | Model | Cost/run | Margin at price |
-|------|--------------|-------|----------|-----------------|
-| Free (3 runs/mo, max 25 scenarios) | Anthropic | Haiku 4.5 | ~$0.30 | -$0.90/user (acquisition) |
-| Starter ($49/mo, 25 runs, 30 scenarios cap) | Anthropic | Haiku 4.5 | ~$0.30/run → ~$7.50 | $41/user (~84% gross) |
-| Pro ($99/mo, 100 runs, 75 scenarios cap) | Anthropic | Haiku 4.5 | ~$0.78/run → ~$78 | $21/user (~21% gross) |
-| Enterprise (custom) | Anthropic | Sonnet 4.6 | ~$2/run | negotiated |
-| BYOK (any tier) | User's API key | Any | $0 LLM cost | platform fee only |
+> Full unit economics and rationale in `docs/business-decisions.md` BD-004. Summary below.
 
-**Rationale:**
-- **Haiku is now the default executor** for all tiers (BD-001). Reliability matches Sonnet on optimized pipeline; cost is 4× lower.
-- **Anthropic-only by default** simplifies operations. Together.ai available as opt-in escape hatch.
-- **Scenario caps per tier** are critical — analyst quality improvements push scenario counts up (42 → 73 typical). Without caps, Pro tier margin erodes.
-- **Pro tier margin is thin (~21%)** at $99/100 runs. Margin improves with sustained cross-scenario caching. **Sensitivity analysis pending** — re-test with scenario cap=30 to confirm cost scales linearly.
+| Tier | Price | Executor runs/mo | Scenarios/run | Models available | Gross margin |
+|------|-------|-----------------|---------------|------------------|--------------|
+| Free | $0 | 5 (env failures free) | 15 (user selects) | Haiku + 1 Sonnet/mo teaser | −$3.85/user (acquisition) |
+| Starter | $29/mo | 20 | 30 | Haiku + Sonnet | ~45% |
+| Pro | $99/mo | 50 | 75 | Haiku + Sonnet + Opus | 26–45% (model-mix sensitive) |
+
+**Analyst runs** (Opus, page-capped): Free = 2/mo (max 20 pages), Starter = 5/mo (max 50 pages), Pro = 10/mo (max 200 pages).
+
+**Issue detection** is unlimited on all tiers — zero LLM cost, strongest free value hook.
+
+**Key constraints:**
+- Haiku must remain the default executor on all tiers. Pro tier turns loss-making if Sonnet becomes the dominant choice (~$116 cost vs $99 revenue at full Sonnet usage).
+- Monitor model selection distribution from first day of beta.
+- Environmental failures (anti-bot blocks, maintenance pages, server errors) do not count against executor run quota.
+- Scenario selection on capped tiers: user explicitly picks which scenarios to include in spec viewer (checkbox per scenario, counter "X/15 selected").
 
 ### Together.ai as alternative provider (opt-in)
 
@@ -274,21 +278,42 @@ Total marginal cost per run:         ~$1.35  (with Browserbase)
                                      ~$0.85  (with self-hosted Playwright)
 ```
 
-### Pricing model (post-2026-05-11 revision)
+### Pricing model (finalized 2026-05-19 — BD-004)
 
-| Tier | Price | Runs/month | Scenarios cap | Cost to us | Gross margin |
-|------|-------|------------|---------------|-----------|--------------|
-| Free | $0 | 3 | 25 | ~$1 | -$1/user (acquisition cost) |
-| Starter | $49/mo | 25 | 30 | ~$10 | $39/user (~80% gross) |
-| Pro | $99/mo | 100 | 75 | ~$80 | $19/user (~20% gross, with Browserbase) |
-| Enterprise | $499+/mo | unlimited (reasonable use) | unlimited | varies | 60–70% gross |
-| BYOK | $9/run flat fee | n/a | unlimited | $0.55 (compute+browser) | $8.45/run (~94% gross) |
+> Supersedes previous tier tables. Full breakdown in `docs/business-decisions.md` BD-004.
 
-**Note:** Pro tier is thinner than originally planned. Drivers:
-- Scenario count grew (42 → 73 typical) as analyst quality improved
-- Per-scenario cost still ~$0.01–0.02 (Haiku, with caching)
+| Tier | Price | Executor runs/mo | Scenarios cap | Monthly cost to us (full usage) | Gross margin |
+|------|-------|-----------------|---------------|---------------------------------|--------------|
+| Free | $0 | 5 | 15 | ~$3.85 | −$3.85 (acquisition) |
+| Starter | $29/mo | 20 | 30 | ~$15.96 | ~45% |
+| Pro | $99/mo | 50 | 75 | $54–73 (model-mix dependent) | 26–45% |
 
-**Sensitivity analysis pending:** re-test at scenario-cap=30 (Free baseline) to confirm per-run cost ~$0.30 holds. If actual cost scales sub-linearly (cache hits across scenarios), margins improve materially.
+**Critical margin note:** Pro margin ranges from 45% (all-Haiku) to 26% (mixed) to −18% (all-Sonnet). Haiku must be the default. Track model distribution from day 1 of beta.
+
+**Not yet implemented** (trigger: Stripe live + beta validates retention):
+- Per-tier enforcement in API
+- Enterprise tier pricing
+
+#### BYOK (Bring Your Own Key) — design finalized, implementation deferred
+
+BYOK is a modifier on paid tiers, not a separate tier. Run counts and scenario caps are unchanged; only who pays for LLM inference changes.
+
+| Plan | Price | Our margin |
+|------|-------|------------|
+| Starter managed | $29/mo | ~45% |
+| Starter + BYOK | $29/mo | ~93% |
+| Pro managed | $99/mo | 26–45% |
+| Pro + BYOK | $79/mo | ~94% |
+| Free | $0 | no BYOK |
+
+Key rules:
+- **Free has no BYOK** — removing LLM cost from free eliminates the upgrade pressure without replacing it with anything else
+- **Pro + BYOK at $79** (not $99) — $20 discount incentivizes power users already paying Anthropic; our margin improves dramatically
+- **Starter + BYOK at $29** (no discount) — value exchange already favours us; model freedom (any LiteLLM model, not tier-gated) is the incentive
+- BYOK + invalid key → run fails immediately, does not count against quota
+- Implementation requires KMS encryption (same as Phase 3 auth credentials) — build together, not separately
+
+Full rationale and implementation notes: `docs/business-decisions.md` BD-004 § BYOK.
 
 ### Break-even analysis
 
@@ -312,9 +337,9 @@ These need to be made before / during the next phases. Each comes with a default
 | **D8** | Compliance roadmap | Open | Defer SOC2 until enterprise demand |
 | **D9** | Geographic regions | Open | US first, EU within 12 months |
 | **D10** | OAuth at MVP | **Postponed — Phase 3** | Form + API key only at Phase 3 launch |
-| **D11** | Pricing model | Open | Subscription + overage |
+| **D11** | Pricing model | **Closed 2026-05-19 (BD-004)** | Free $0 / Starter $29 / Pro $99 subscription; no per-run overage at MVP |
 | **D12** | Free tier policy on auth | Open | No auth on free (mitigates security risk) |
-| **D13** | Scenario cap policy | **Open — Phase 2 prereq** | Hard cap per tier at MVP; predictable cost; clear UX |
+| **D13** | Scenario cap policy | **Closed 2026-05-19 (BD-004)** | Free=15 / Starter=30 / Pro=75; user selects which scenarios run; env failures excluded from quota |
 
 ---
 
@@ -398,6 +423,6 @@ Before scaling Phase 2, the following need owner input:
 3. **Branding decision** — "Powered by Claude" prominent (Anthropic-only positioning), or "AI-agnostic" (multi-provider positioning)?
 4. **Open-source posture** — keep CLI fully open-source, hosted version proprietary? Both proprietary? Both open?
 5. **Funding runway** — bootstrapping (need positive unit economics from week 1) or VC-funded (loss-leader free tier OK)?
-6. **Scenario cap per tier (D13)** — confirm Free=25 / Starter=30 / Pro=75, or adjust based on target customer's typical product complexity?
+6. ~~**Scenario cap per tier (D13)**~~ — closed 2026-05-19 (BD-004): Free=15 / Starter=30 / Pro=75.
 
-These shape decisions D8, D9, D11, D13 above.
+These shape decisions D8, D9, D11, D13 above. D11 and D13 are now closed.

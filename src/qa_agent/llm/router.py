@@ -209,6 +209,10 @@ _TEST_TIMEOUT_DEFAULTS: dict = {
 _RATE_LIMIT_MAX_RETRIES = 2   # attempts after the first failure
 _RATE_LIMIT_WAIT_BASE   = 60  # seconds before retry 1; doubles for retry 2
 
+# InternalServerError retry (Anthropic 5xx — transient, resolves in seconds)
+_INTERNAL_ERROR_MAX_RETRIES = 2
+_INTERNAL_ERROR_WAIT        = 10  # seconds between retries
+
 
 def _resolve_timeout(defaults: dict, provider: str, model: str) -> int | None:
     """Resolve a timeout from a provider/model-keyed defaults dict."""
@@ -397,10 +401,12 @@ def complete(
     if response_format:
         kwargs["response_format"] = response_format
 
-    max_retries = int(os.getenv("QA_RATE_LIMIT_RETRIES", _RATE_LIMIT_MAX_RETRIES))
-    wait_base   = int(os.getenv("QA_RATE_LIMIT_WAIT",    _RATE_LIMIT_WAIT_BASE))
+    max_retries    = int(os.getenv("QA_RATE_LIMIT_RETRIES", _RATE_LIMIT_MAX_RETRIES))
+    wait_base      = int(os.getenv("QA_RATE_LIMIT_WAIT",    _RATE_LIMIT_WAIT_BASE))
+    ise_retries    = _INTERNAL_ERROR_MAX_RETRIES
+    ise_wait       = _INTERNAL_ERROR_WAIT
 
-    for attempt in range(max_retries + 1):
+    for attempt in range(max(max_retries, ise_retries) + 1):
         try:
             response = litellm.completion(**kwargs)
             if os.getenv("QA_VERBOSE_LLM", "").lower() in ("1", "true"):
@@ -432,3 +438,12 @@ def complete(
                 file=sys.stderr, flush=True,
             )
             time.sleep(wait)
+        except litellm.InternalServerError:
+            if attempt >= ise_retries:
+                raise
+            print(
+                f"[qa-agent] InternalServerError — waiting {ise_wait}s before retry "
+                f"{attempt + 1}/{ise_retries} ({config.provider}/{config.resolved_model()})...",
+                file=sys.stderr, flush=True,
+            )
+            time.sleep(ise_wait)

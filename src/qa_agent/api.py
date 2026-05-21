@@ -729,12 +729,16 @@ async def _run_analysis_task(task_id: str, product_id: str, req: AnalyzeRequest)
             "cost_usd": result.get("cost_usd"),
             "issues_count": result.get("issues_count", 0),
         })
+        asyncio.ensure_future(db_jobs.update(task_id, status="done",
+            completed_at=datetime.now(timezone.utc)))
     except Exception as e:
         state.update({
             "status": "failed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "error": str(e),
         })
+        asyncio.ensure_future(db_jobs.update(task_id, status="failed",
+            completed_at=datetime.now(timezone.utc), error=str(e)))
 
 
 @app.post("/products/{product_id}/analyze", status_code=202)

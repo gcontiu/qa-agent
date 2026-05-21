@@ -35,8 +35,11 @@ async def count_runs_this_month(user_id: str) -> int:
 
 
 async def count_scans_this_month(user_id: str) -> int:
-    """Count analyst runs in the jobs table started this calendar month.
-    Analyst tasks are stored with spec_dir prefix 'analyze:'."""
+    """Count analyst runs this calendar month, excluding failed ones.
+
+    Failed scans (Anthropic errors, bad URLs, etc.) don't count against quota —
+    consistent with BD-004's rule that environmental failures are free.
+    """
     pool = get_pool()
     if not pool:
         return 0
@@ -46,6 +49,7 @@ async def count_scans_this_month(user_id: str) -> int:
             SELECT COUNT(*) AS n FROM jobs
             WHERE user_id = $1::uuid
               AND spec_dir LIKE 'analyze:%'
+              AND status != 'failed'
               AND date_trunc('month', started_at) = date_trunc('month', now())
             """,
             user_id,

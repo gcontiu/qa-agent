@@ -583,6 +583,181 @@ A single reusable `<LogPanel endpoint="..." active={bool} />` component is used 
 
 ---
 
+## Tier Enforcement & Quota
+
+### Overview
+
+Every authenticated user has a `tier` field (`free` | `beta` | `starter` | `pro`) on `public.users`. The API reads this tier on every run and scan request, enforces limits, and surfaces usage counters to the frontend. No billing integration is needed to enforce limits — tier is set manually in DB for beta users.
+
+### Tier limits
+
+| Tier | Runs/mo | Scans/mo | Scenarios/run | Models |
+|------|---------|----------|---------------|--------|
+| free | 5 | 2 | 15 | Haiku |
+| beta | 10 | 3 | 20 | Haiku + Sonnet |
+| starter | 20 | 5 | 30 | Haiku + Sonnet |
+| pro | 50 | 10 | 75 | Haiku + Sonnet + Opus |
+
+"Scans" = analyst runs (`POST /products/{id}/analyze`). Issue detection (deterministic scanner) is never counted against any quota — zero LLM cost.
+
+### Database
+
+```sql
+-- Tier on the user mirror
+ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'
+    CHECK (tier IN ('free', 'beta', 'starter', 'pro'));
+
+-- One row per block event — used to deduplicate notification emails
+CREATE TABLE quota_events (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_type  TEXT NOT NULL CHECK (event_type IN ('run_blocked', 'scan_blocked')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+Analyst runs are tracked in the `jobs` table with `spec_dir = 'analyze:{product_id}'` so `count_scans_this_month()` can query the same table as executor runs.
+
+### Backend — `src/qa_agent/db/quota.py`
+
+| Function | Purpose |
+|----------|---------|
+| `get_tier(user_id)` | Returns tier string; defaults to `'free'` if DB unavailable |
+| `count_runs_this_month(user_id)` | COUNT on `jobs` for this calendar month |
+| `count_scans_this_month(user_id)` | COUNT on `jobs` where `spec_dir LIKE 'analyze:%'` |
+| `log_quota_event(user_id, event_type)` | Insert row into `quota_events` |
+| `already_notified_this_month(user_id, event_type)` | Check if email already sent this month |
+
+### Backend — enforcement in `api.py`
+
+**`POST /runs`:**
+1. Read tier → get limits
+2. If `executor_model` not in `limits["models"]` → 403
+3. Cap `max_scenarios` to `limits["scenarios"]` silently
+4. Count runs this month; if ≥ limit → log event + 429 with structured body + async email
+
+**`POST /products/{id}/analyze`:**
+1. Same tier lookup
+2. Count scans this month; if ≥ limit → log event + 429 + async email
+
+**429 body format:**
+```json
+{
+  "detail": {
+    "code": "quota_exceeded",
+    "type": "run_blocked" | "scan_blocked",
+    "used": 10,
+    "limit": 10,
+    "tier": "beta"
+  }
+}
+```
+
+### Backend — `GET /me/quota`
+
+```json
+{
+  "tier": "beta",
+  "limits": { "runs_per_month": 10, "scans_per_month": 3, "scenarios_per_run": 20 },
+  "usage":  { "runs_this_month": 7, "scans_this_month": 2 },
+  "models_allowed": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"]
+}
+```
+
+Called once per session by `QuotaProvider` with 30s stale time. Invalidated after each run or scan mutation.
+
+### Email notifications — Resend
+
+When a user hits their limit **for the first time this month** (checked via `quota_events`), two emails are sent asynchronously via Resend:
+
+- **User email:** "You've hit your beta limit. Reply for more access."
+- **Admin email:** "{email} hit {event_type} quota — hot lead."
+
+Requires `RESEND_API_KEY` env var (Fly secret). No-op if unset.
+
+### Frontend
+
+| File | Role |
+|------|------|
+| `src/contexts/quota.tsx` | `QuotaProvider` fetches `GET /me/quota`, exposes via `useQuota()` |
+| `src/components/layout/AppLayout.tsx` | `TierBadge` in sidebar: tier chip + runs/scans counters (red when at limit) |
+| `src/pages/RunsPage.tsx` | Counter below page title; `QuotaLimitModal` on 429; model selector filtered by `models_allowed` |
+| `src/pages/ProductDetailPage.tsx` | Scan counter below Analyze button; `QuotaLimitModal` on 429 |
+| `src/components/QuotaLimitModal.tsx` | Dialog shown on 429: explains limit, links to "talk to founder" |
+| `src/lib/api.ts` | `QuotaError` class; 429 interceptor parses `code: quota_exceeded` and throws it |
+
+### Setting a user's tier (manual — beta phase)
+
+```sql
+UPDATE public.users SET tier = 'beta' WHERE email = 'user@example.com';
+```
+
+When Stripe is live, this will be set programmatically by the webhook handler.
+
+### Files added / modified
+
+| File | Change |
+|------|--------|
+| `supabase/migrations/20260521000000_tier_and_quota.sql` | `tier` column + `quota_events` table |
+| `src/qa_agent/db/quota.py` | New — quota DB helpers |
+| `src/qa_agent/api.py` | `TIER_LIMITS`, `GET /me/quota`, enforcement, Resend email |
+| `frontend/src/lib/types.ts` | `Quota`, `QuotaLimits`, `QuotaUsage` types |
+| `frontend/src/lib/api.ts` | `QuotaError` class + 429 interceptor |
+| `frontend/src/contexts/quota.tsx` | New — `QuotaProvider` + `useQuota()` |
+| `frontend/src/components/QuotaLimitModal.tsx` | New — limit dialog |
+| `frontend/src/components/layout/AppLayout.tsx` | `TierBadge` + `QuotaProvider` wrapper |
+| `frontend/src/pages/RunsPage.tsx` | Counters, `QuotaLimitModal`, dynamic model selector |
+| `frontend/src/pages/ProductDetailPage.tsx` | Scan counter + `QuotaLimitModal` |
+
+---
+
+## Landing Page (steadra.dev)
+
+### Overview
+
+A public marketing page at `/` that collects waitlist emails for the closed beta. It is served by the same FastAPI server as the dashboard — no separate deployment.
+
+### Route structure
+
+`/` is a public React Router route (outside `<ProtectedRoute>`). The `_spa_html_middleware` serves `index.html` for browser navigations to `/` so the React SPA handles rendering.
+
+### Sections
+
+| Section | Purpose |
+|---------|---------|
+| Nav | Logo + "Sign in →" link |
+| Hero | H1 + sub + email capture form |
+| Screenshot placeholder | 16:9 dashed container for future product screenshot |
+| How it works | 3-step cards: Free issue scan → Define scenarios → Ship with confidence |
+| Pricing | 3-column cards: Free / Starter (Recommended) / Pro — per BD-004 |
+| Footer | Tagline + copyright |
+
+### Waitlist endpoint
+
+```
+POST /waitlist
+Body: { "email": "user@example.com" }
+Responses: 201 OK | 409 Already on list | 422 Invalid email
+```
+
+Stored as JSON at `reports/.state/waitlist.json`. Rate-limited at 5 requests/minute via slowapi. No email sent on signup (manual outreach model for beta).
+
+### www → apex redirect
+
+`_www_redirect_middleware` returns HTTP 301 for any request where `Host` starts with `www.`, stripping the prefix. Applied before all other middleware. Both `steadra.dev` and `www.steadra.dev` have TLS certificates issued by Let's Encrypt via Fly.
+
+### Files
+
+| File | Change |
+|------|--------|
+| `frontend/src/pages/LandingPage.tsx` | New — full landing page component |
+| `frontend/src/App.tsx` | Added public `<Route path="/" element={<LandingPage />} />` |
+| `frontend/index.html` | Updated `<title>` + OG meta tags for steadra.dev |
+| `frontend/vite.config.ts` | Added `/waitlist` proxy entry |
+| `src/qa_agent/api.py` | `POST /waitlist` endpoint + `_www_redirect_middleware` |
+
+---
+
 ## Issue Detection
 
 ### What it does

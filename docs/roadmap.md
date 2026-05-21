@@ -2,9 +2,9 @@
 
 Strategic plan for transitioning qa-agent from a local CLI tool to a hosted SaaS where users authenticate, configure their products (including auth), and run automated test suites. Captures phased deliverables, open decisions, cost projections, and risk register.
 
-> **Status:** Phase 2 MVP complete for closed beta. Steps 1–11 done: Supabase Auth (ES256/JWKS), multitenancy, React+Vite dashboard, spec viewer/editor, LogSink streaming, issue detection — all deployed on Fly.io with local Chromium. Tier structure finalized (BD-004). Next: closed beta (5–10 users), then Stripe + per-tier enforcement.
+> **Status:** Closed beta in progress. Steps 1–11 + tier enforcement + landing page done. steadra.dev is live with waitlist capture. Beta users can be invited via Supabase invite + `UPDATE users SET tier='beta'`. Next: onboard 5-10 users, collect feedback, then Stripe + public launch.
 >
-> **Last updated:** 2026-05-19
+> **Last updated:** 2026-05-21
 
 ---
 
@@ -134,6 +134,9 @@ Strict order. Each step gates the next; do not parallelize without reason.
 
 > **React stack:** React 18 + TypeScript, Vite, React Router v6, TanStack Query (polling + caching), shadcn/ui + Tailwind CSS, react-hook-form + zod, Monaco Editor (lazy), `@supabase/supabase-js`.
 
+| 12 | **Landing page** (steadra.dev) | Public `/` with hero, pricing, waitlist email capture → `POST /waitlist`. www redirect. TLS via Fly + Let's Encrypt. |
+| 13 | **Tier enforcement + quota UX** | `tier` column on `public.users`, `quota_events` table, `GET /me/quota`, enforcement on `POST /runs` + `POST /products/{id}/analyze`, TierBadge in sidebar, `QuotaLimitModal` on 429, Resend email on first monthly block. Beta tier: 10 runs / 3 scans / 20 scenarios / Haiku+Sonnet. Opus blocked for free/beta. |
+
 **Stop here for closed beta.** Onboard 5–10 hand-picked users. Validate demand. Stripe + tiered scenario caps come *after* this stage answers "do people want this?".
 
 #### Phase 2 — Deferred from MVP
@@ -147,7 +150,7 @@ Each item is deferred against a specific trigger. When the trigger fires, move i
 | **R2/S3 for report storage** | Average `report.json` + evidence > 1 MB, or users request public report sharing links |
 | **`.specs/` temp dir cleanup + volume reduction** | Before Phase 2 public launch. See note below. |
 | **Stripe billing + tiered plans** | Closed beta validates retention ≥ 30% week-2; until then, manual invoicing for paid users |
-| **Tiered scenario caps (Free/Starter/Pro)** | Stripe is live; before that, single hardcoded global cap |
+| **Tiered scenario caps (Free/Starter/Pro) via Stripe** | Stripe webhook sets `tier` column; beta enforces limits manually. Full per-tier enforcement already in `TIER_LIMITS` dict in `api.py` — only Stripe webhook integration is missing. |
 | **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue. Design finalized in BD-004 — Starter+BYOK=$29, Pro+BYOK=$79, Free has no BYOK. Implementation shares KMS encryption with Phase 3 auth credentials; build together, not separately. |
 | **Auth into *target products*** (form login, OAuth, 2FA, KMS vault — Phase 3) | ≥ 30% of beta users request testing of authenticated pages; or first paying customer makes it a deal-breaker |
 | **Executor runs only approved specs** (`get_files_dict` filters `approved = true`) | First beta user complains that unapproved/draft specs reached the executor and produced misleading results; or approval workflow is confirmed as mandatory UX gate before launch |

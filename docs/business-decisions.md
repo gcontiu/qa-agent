@@ -244,6 +244,77 @@ Model freedom is the primary upgrade incentive for BYOK: a Starter user who want
 - Billing: Stripe subscription at BYOK price; LLM charges go to user's Anthropic account directly
 - If user's key is invalid or over quota: run fails immediately with a clear error ("Your API key returned 401 — check your Anthropic account"), does not count against run quota
 
+---
+
+## BD-005 — Closed beta access model and tier constraints
+
+**Date:** 2026-05-21
+**Status:** Closed — implemented
+
+### Context
+
+Before inviting the first 5-10 hand-picked beta users, we needed to define: what limits apply to them, how they discover those limits, and how we prevent runaway LLM costs without degrading the experience enough to lose feedback signal.
+
+### Decisions
+
+#### Beta tier limits
+
+Beta users get the "beta" tier (`tier = 'beta'` in `public.users`), set manually via SQL when an invite is sent. Limits:
+
+| Dimension | Beta | Free | Rationale |
+|-----------|------|------|-----------|
+| Executor runs/month | 10 | 5 | Enough to test 3-4 flows iteratively |
+| Analyst scans/month | 3 | 2 | 1 initial + 2 follow-ups after fixes |
+| Scenarios/run | 20 | 15 | Covers a realistic flow end-to-end |
+| Models | Haiku + Sonnet | Haiku only | Sonnet exposes quality difference → upgrade trigger |
+| Opus | Blocked | Blocked | Biggest cost risk; not needed to demonstrate value |
+
+#### Why not Free tier limits for beta users
+
+Free tier limits are designed for conversion pressure (upgrade after 2 runs), not for feedback gathering. Beta users need to complete a full cycle — analyst → review specs → run tests → fix → re-run — at least twice to give meaningful feedback. Free limits would cut them off mid-cycle.
+
+#### Why not Starter tier limits
+
+At full Starter usage (5 scans × $1.40 + 20 runs × $1.50), one active beta user can cost $37/month. With 10 users: $370/month before any revenue. Beta is a learning investment, not revenue, so cost must be bounded. Beta limits keep worst-case cost at ~$20/user/month = $200/month for 10 users.
+
+#### Opus is blocked for all non-Pro users
+
+Opus costs ~10× more than Haiku per run. A single 75-scenario Opus run costs ~$2-3 in executor tokens alone. Blocking it for free and beta removes the main cost runaway vector. Beta users can use Sonnet (good quality, ~$0.41 for 15 scenarios) which is sufficient to validate the product.
+
+#### Issue detection is never quota-gated
+
+The deterministic scanner (JS errors, 4xx/5xx, broken links) has zero LLM cost. Every analyst scan runs it automatically. Capping it would remove the strongest free value hook without any cost benefit.
+
+#### Quota UX: show limits, don't hide them
+
+When a user hits their limit:
+1. API returns 429 with structured body (`code: quota_exceeded`, type, used, limit, tier)
+2. Frontend shows a `QuotaLimitModal` — not a generic error toast
+3. Modal copy: explains the limit, links to "talk to founder" email
+4. On first monthly block: email sent to user (warm, relationship-focused) + email to admin (hot lead alert)
+5. Subsequent blocks in same month: no additional emails (anti-spam)
+
+Beta modal CTA links to `mailto:anghel@steadra.dev` — human conversation, not a checkout page. There is no Stripe yet; the goal is feedback and relationship, not revenue.
+
+#### Tier visible in sidebar
+
+The sidebar shows a tier badge (color-coded: cyan for beta, blue for starter, purple for pro) and live counters: `7/10 runs · 2/3 scans` (turns red when at limit). Users know their limits before hitting them.
+
+### Expected outcome
+
+- Beta users experience the full product value (issue detection + scenario testing + iteration)
+- Cost stays under $200/month for 10 users
+- Users who hit limits reach out → warm conversion conversations
+- We observe which limits are hit first (runs vs scans) → informs tier design for launch
+
+### Triggers to revisit
+
+| Question | Trigger |
+|----------|---------|
+| Are beta limits too tight? | ≥3 users hit limit in week 1 and report incomplete feedback |
+| Are beta limits too generous? | Monthly cost > $300 before any revenue |
+| Should Sonnet be default on beta? | ≥50% of beta runs use Sonnet explicitly; Haiku quality deemed insufficient |
+
 ### Open questions
 
 | Question | Trigger to revisit |

@@ -95,6 +95,16 @@ _FRONTEND_DIR = Path(__file__).parent / "frontend"
 _SPA_ROUTE_PREFIXES = ("/products", "/runs", "/login")
 
 @app.middleware("http")
+async def _www_redirect_middleware(request: Request, call_next: Any) -> Any:
+    host = request.headers.get("host", "")
+    if host.startswith("www."):
+        url = request.url.replace(netloc=host[4:])
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=str(url), status_code=301)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _spa_html_middleware(request: Request, call_next: Any) -> Any:
     """Serve index.html for browser navigations to React Router paths.
 

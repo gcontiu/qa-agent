@@ -382,7 +382,10 @@ async def run_analysis(
                                         console.print(f"[dim cyan]  [scanner] console preview: {ct[:300]!r}[/dim cyan]")
                                     scanner.ingest_console(nav_url, ct, issues_sink)
                                 except Exception as e:
-                                    console.print(f"[yellow]  [scanner] browser_console_messages error: {e}[/yellow]")
+                                    msg = f"[scanner] browser_console_messages error: {e}"
+                                    console.print(f"[yellow]  {msg}[/yellow]")
+                                    if sink:
+                                        sink.emit(msg)
                             if _has_network_tool:
                                 try:
                                     nr = await session.call_tool("browser_network_requests", {})
@@ -392,7 +395,10 @@ async def run_analysis(
                                         console.print(f"[dim cyan]  [scanner] network preview: {nt[:300]!r}[/dim cyan]")
                                     scanner.ingest_network(nav_url, nt, issues_sink)
                                 except Exception as e:
-                                    console.print(f"[yellow]  [scanner] browser_network_requests error: {e}[/yellow]")
+                                    msg = f"[scanner] browser_network_requests error: {e}"
+                                    console.print(f"[yellow]  {msg}[/yellow]")
+                                    if sink:
+                                        sink.emit(msg)
 
                         tool_results.append({
                             "role": "tool",

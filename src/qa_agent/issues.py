@@ -32,14 +32,18 @@ _SEVERITY_RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
 # Analytics/tracking domains to ignore in network scans
 _NOISE_DOMAINS = re.compile(
     r'(google-analytics|gtm\.js|googletagmanager|facebook\.net|hotjar|clarity\.ms'
-    r'|doubleclick|adnxs|googlesyndication|cdn\.cookielaw|sentry\.io)',
+    r'|doubleclick|adnxs|googlesyndication|cdn\.cookielaw|sentry\.io'
+    r'|optimizely\.com|analytics\.google|segment\.io|mixpanel\.com'
+    r'|amplitude\.com|intercom\.io|crisp\.chat|tawk\.to|drift\.com)',
     re.IGNORECASE,
 )
 
-# Console lines to ignore (framework noise)
+# Console lines to ignore (framework noise and MCP output headers)
 _CONSOLE_NOISE = re.compile(
     r'(Download the React DevTools|\[HMR\]|\[vite\]|favicon\.ico'
-    r'|Google Tag Manager|__webpack_hmr)',
+    r'|Google Tag Manager|__webpack_hmr'
+    r'|^###\s+Result'
+    r'|^Total messages:\s*\d+)',
     re.IGNORECASE,
 )
 
@@ -136,25 +140,42 @@ class DeterministicScanner:
             line = line.strip()
             if not line or _NOISE_DOMAINS.search(line):
                 continue
-            match = re.search(r'\b([45]\d{2})\b', line)
-            if not match:
+            # Skip MCP output header
+            if line.startswith('###') or line.startswith('Total messages:'):
                 continue
-            status = int(match.group(1))
-            if status >= 500:
-                sink.add(Issue(
-                    type="network_5xx",
-                    severity="high",
-                    url=current_url,
-                    message=f"HTTP {status}: {line[:120]}",
-                    details={"status": status, "raw": line},
-                ))
-            elif status >= 400:
+            # Detect HTTP 4xx/5xx status codes: "=> [404]" or bare "404"
+            http_match = re.search(r'\b([45]\d{2})\b', line)
+            if http_match:
+                status = int(http_match.group(1))
+                if status >= 500:
+                    sink.add(Issue(
+                        type="network_5xx",
+                        severity="high",
+                        url=current_url,
+                        message=f"HTTP {status}: {line[:120]}",
+                        details={"status": status, "raw": line},
+                    ))
+                elif status >= 400:
+                    sink.add(Issue(
+                        type="network_4xx",
+                        severity="medium",
+                        url=current_url,
+                        message=f"HTTP {status}: {line[:120]}",
+                        details={"status": status, "raw": line},
+                    ))
+                continue
+            # Detect [FAILED] network requests (no HTTP status, e.g. ERR_EMPTY_RESPONSE)
+            if '[FAILED]' in line:
+                # Extract the URL from "N. [METHOD] <url> => [FAILED] <reason>"
+                url_match = re.search(r'\[(?:GET|POST|PUT|DELETE|HEAD|OPTIONS)\]\s+(\S+)', line)
+                resource_url = url_match.group(1) if url_match else line[:120]
+                reason = line.split('[FAILED]')[-1].strip()
                 sink.add(Issue(
                     type="network_4xx",
                     severity="medium",
                     url=current_url,
-                    message=f"HTTP {status}: {line[:120]}",
-                    details={"status": status, "raw": line},
+                    message=f"Request failed: {resource_url[:80]} — {reason[:40]}",
+                    details={"raw": line},
                 ))
 
     @staticmethod

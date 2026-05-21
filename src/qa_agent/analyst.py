@@ -257,7 +257,10 @@ async def run_analysis(
             _has_console_tool = "browser_console_messages" in available_tool_names
             _has_network_tool = "browser_network_requests" in available_tool_names
             _current_url = url
-            console.print(f"[cyan][scanner-init] has_console={_has_console_tool} has_network={_has_network_tool} available_tools={sorted(available_tool_names)}[/cyan]")
+            _scanner_msg = f"[scanner-init] has_console={_has_console_tool} has_network={_has_network_tool} tools={sorted(available_tool_names)}"
+            console.print(f"[cyan]{_scanner_msg}[/cyan]")
+            if sink:
+                sink.emit(_scanner_msg)
 
             messages: list[dict] = [
                 {"role": "system", "content": _system_prompt()},

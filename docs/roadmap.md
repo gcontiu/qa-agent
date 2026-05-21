@@ -151,6 +151,7 @@ Each item is deferred against a specific trigger. When the trigger fires, move i
 | **`.specs/` temp dir cleanup + volume reduction** | Before Phase 2 public launch. See note below. |
 | **Stripe billing + tiered plans** | Closed beta validates retention ≥ 30% week-2; until then, manual invoicing for paid users |
 | **Tiered scenario caps (Free/Starter/Pro) via Stripe** | Stripe webhook sets `tier` column; beta enforces limits manually. Full per-tier enforcement already in `TIER_LIMITS` dict in `api.py` — only Stripe webhook integration is missing. |
+| **Product count limit per tier** (Free=1, Starter=1, Pro=3) | Defined in BD-004 but not yet enforced in `POST /products`. Trigger: Stripe live (tier becomes meaningful boundary). Until then, product count is unlimited — scans/runs limits provide sufficient cost control. |
 | **BYOK (user's Anthropic key)** | First paying user explicitly asks, or LLM cost > 50% of revenue. Design finalized in BD-004 — Starter+BYOK=$29, Pro+BYOK=$79, Free has no BYOK. Implementation shares KMS encryption with Phase 3 auth credentials; build together, not separately. |
 | **Auth into *target products*** (form login, OAuth, 2FA, KMS vault — Phase 3) | ≥ 30% of beta users request testing of authenticated pages; or first paying customer makes it a deal-breaker |
 | **Executor runs only approved specs** (`get_files_dict` filters `approved = true`) | First beta user complains that unapproved/draft specs reached the executor and produced misleading results; or approval workflow is confirmed as mandatory UX gate before launch |

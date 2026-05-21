@@ -275,7 +275,7 @@ export default function ProductDetailPage() {
       {id && (
         <>
           <Separator className="my-6" />
-          <IssuesPanel productId={id} hasScanned={!!task} />
+          <IssuesPanel productId={id} hasScanned={!!task || specs.length > 0} />
         </>
       )}
 

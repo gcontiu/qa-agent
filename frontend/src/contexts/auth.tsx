@@ -19,20 +19,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [client, setClient] = useState<SupabaseClient | null>(null)
 
   useEffect(() => {
+    let unsubscribe: (() => void) | null = null
+
     getSupabaseClient().then(sb => {
       setClient(sb)
-      sb.auth.getSession().then(({ data }) => {
-        const s = data.session
+      // onAuthStateChange fires immediately with INITIAL_SESSION event,
+      // giving us the current session (auto-refreshed if expired).
+      // We no longer call getSession() separately — that caused loading=false
+      // to fire before Supabase had a chance to refresh an expired token.
+      const { data: listener } = sb.auth.onAuthStateChange((_event, s) => {
         setSession(s)
         setToken(s?.access_token ?? null)
         setLoading(false)
       })
-      const { data: listener } = sb.auth.onAuthStateChange((_event, s) => {
-        setSession(s)
-        setToken(s?.access_token ?? null)
-      })
-      return () => listener.subscription.unsubscribe()
+      unsubscribe = () => listener.subscription.unsubscribe()
     })
+
+    return () => { unsubscribe?.() }
   }, [])
 
   async function signIn(email: string, password: string) {

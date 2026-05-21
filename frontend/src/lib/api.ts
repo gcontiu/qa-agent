@@ -5,14 +5,18 @@ export function setToken(t: string | null) {
 }
 
 export class QuotaError extends Error {
-  constructor(
-    public readonly quotaType: 'run_blocked' | 'scan_blocked',
-    public readonly used: number,
-    public readonly limit: number,
-    public readonly tier: string,
-  ) {
+  quotaType: 'run_blocked' | 'scan_blocked'
+  used: number
+  limit: number
+  tier: string
+
+  constructor(quotaType: 'run_blocked' | 'scan_blocked', used: number, limit: number, tier: string) {
     super('quota_exceeded')
     this.name = 'QuotaError'
+    this.quotaType = quotaType
+    this.used = used
+    this.limit = limit
+    this.tier = tier
   }
 }
 

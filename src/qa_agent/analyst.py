@@ -373,16 +373,22 @@ async def run_analysis(
                                 try:
                                     cr = await session.call_tool("browser_console_messages", {})
                                     ct = "\n".join(c.text for c in cr.content if hasattr(c, "text"))
+                                    console.print(f"[dim cyan]  [scanner] console ({len(ct)} chars, {len(ct.splitlines())} lines)[/dim cyan]")
+                                    if ct.strip():
+                                        console.print(f"[dim cyan]  [scanner] console preview: {ct[:300]!r}[/dim cyan]")
                                     scanner.ingest_console(nav_url, ct, issues_sink)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    console.print(f"[yellow]  [scanner] browser_console_messages error: {e}[/yellow]")
                             if _has_network_tool:
                                 try:
                                     nr = await session.call_tool("browser_network_requests", {})
                                     nt = "\n".join(c.text for c in nr.content if hasattr(c, "text"))
+                                    console.print(f"[dim cyan]  [scanner] network ({len(nt)} chars, {len(nt.splitlines())} lines)[/dim cyan]")
+                                    if nt.strip():
+                                        console.print(f"[dim cyan]  [scanner] network preview: {nt[:300]!r}[/dim cyan]")
                                     scanner.ingest_network(nav_url, nt, issues_sink)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    console.print(f"[yellow]  [scanner] browser_network_requests error: {e}[/yellow]")
 
                         tool_results.append({
                             "role": "tool",

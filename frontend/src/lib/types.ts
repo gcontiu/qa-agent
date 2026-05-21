@@ -26,6 +26,7 @@ export interface AnalyzeTask {
   completed_at?: string
   files_written?: string[]
   file_count?: number
+  issues_count?: number
   summary?: string
   cost_usd?: number
   error?: string

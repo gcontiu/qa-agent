@@ -4,7 +4,7 @@ import { api } from '@/lib/api'
 import type { Issue, IssuesSummary } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { AlertTriangle, AlertCircle, Info, ExternalLink } from 'lucide-react'
+import { AlertTriangle, AlertCircle, Info, ExternalLink, CheckCircle2, ShieldCheck } from 'lucide-react'
 
 const SEVERITY_CONFIG = {
   high:   { icon: AlertCircle,  color: 'text-destructive',    border: 'border-destructive/40',  bg: 'bg-destructive/5'  },
@@ -150,10 +150,10 @@ function IssueRow({ issue, productId }: { issue: Issue; productId: string }) {
 
 type StatusFilter = 'open' | 'all'
 
-export default function IssuesPanel({ productId }: { productId: string }) {
+export default function IssuesPanel({ productId, hasScanned }: { productId: string; hasScanned: boolean }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open')
 
-  const { data: summary } = useQuery<IssuesSummary>({
+  const { data: summary, isLoading } = useQuery<IssuesSummary>({
     queryKey: ['issues-summary', productId],
     queryFn: () => api.get(`/products/${productId}/issues/summary`),
   })
@@ -165,7 +165,33 @@ export default function IssuesPanel({ productId }: { productId: string }) {
     enabled: !!summary && summary.total > 0,
   })
 
-  if (!summary || summary.total === 0) return null
+  if (isLoading) return null
+
+  // No analysis run yet
+  if (!hasScanned) {
+    return (
+      <div>
+        <h2 className="text-base font-medium mb-3">Issues</h2>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+          <ShieldCheck className="h-4 w-4 shrink-0" />
+          Run an analysis to automatically detect JS errors, broken links, and server errors.
+        </div>
+      </div>
+    )
+  }
+
+  // Analysis ran but no issues found
+  if (!summary || summary.total === 0) {
+    return (
+      <div>
+        <h2 className="text-base font-medium mb-3">Issues</h2>
+        <div className="flex items-center gap-2 text-sm text-green-600 py-4">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          No issues detected on last scan.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

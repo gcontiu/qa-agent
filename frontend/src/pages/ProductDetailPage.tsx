@@ -193,8 +193,15 @@ export default function ProductDetailPage() {
           {task.status === 'running' && (
             <p className="text-sm text-muted-foreground">Crawling and generating specs…</p>
           )}
-          {task.status === 'done' && task.summary && (
-            <p className="text-sm text-muted-foreground">{task.summary}</p>
+          {task.status === 'done' && (
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              {task.summary && <span>{task.summary}</span>}
+              {task.issues_count !== undefined && (
+                <span className={task.issues_count > 0 ? 'text-amber-600 font-medium' : 'text-green-600'}>
+                  {task.issues_count > 0 ? `${task.issues_count} issue${task.issues_count !== 1 ? 's' : ''} found` : 'No issues found'}
+                </span>
+              )}
+            </div>
           )}
           {task.status === 'failed' && task.error && (
             <Alert variant="destructive" className="mt-2">
@@ -268,7 +275,7 @@ export default function ProductDetailPage() {
       {id && (
         <>
           <Separator className="my-6" />
-          <IssuesPanel productId={id} />
+          <IssuesPanel productId={id} hasScanned={!!task} />
         </>
       )}
 

@@ -370,33 +370,49 @@ async def run_analysis(
                             result_text = f"Tool error: {e}"
 
                         # After navigation: run deterministic issue scanner
+                        if sink:
+                            sink.emit(f"SCAN_CHECK: name={name!r} issues_sink={issues_sink is not None} has_console={_has_console_tool} has_network={_has_network_tool}")
                         if name == "browser_navigate" and issues_sink:
                             nav_url = args.get("url", _current_url)
                             _current_url = nav_url
+                            if sink:
+                                sink.emit(f"SCAN_START: nav_url={nav_url}")
                             if _has_console_tool:
+                                if sink:
+                                    sink.emit("SCAN_CONSOLE: calling browser_console_messages")
                                 try:
                                     cr = await session.call_tool("browser_console_messages", {})
                                     ct = "\n".join(c.text for c in cr.content if hasattr(c, "text"))
-                                    console.print(f"[dim cyan]  [scanner] console ({len(ct)} chars, {len(ct.splitlines())} lines)[/dim cyan]")
-                                    if ct.strip():
-                                        console.print(f"[dim cyan]  [scanner] console preview: {ct[:300]!r}[/dim cyan]")
+                                    if sink:
+                                        sink.emit(f"SCAN_CONSOLE: got {len(ct)} chars / {len(ct.splitlines())} lines")
+                                        if ct.strip():
+                                            sink.emit(f"SCAN_CONSOLE: preview={ct[:400]!r}")
+                                    issues_before = len(issues_sink._by_fp) if hasattr(issues_sink, '_by_fp') else -1
                                     scanner.ingest_console(nav_url, ct, issues_sink)
+                                    issues_after = len(issues_sink._by_fp) if hasattr(issues_sink, '_by_fp') else -1
+                                    if sink:
+                                        sink.emit(f"SCAN_CONSOLE: ingested, issues {issues_before} -> {issues_after}")
                                 except Exception as e:
-                                    msg = f"[scanner] browser_console_messages error: {e}"
-                                    console.print(f"[yellow]  {msg}[/yellow]")
+                                    msg = f"SCAN_CONSOLE_ERROR: {type(e).__name__}: {e}"
                                     if sink:
                                         sink.emit(msg)
                             if _has_network_tool:
+                                if sink:
+                                    sink.emit("SCAN_NETWORK: calling browser_network_requests")
                                 try:
                                     nr = await session.call_tool("browser_network_requests", {})
                                     nt = "\n".join(c.text for c in nr.content if hasattr(c, "text"))
-                                    console.print(f"[dim cyan]  [scanner] network ({len(nt)} chars, {len(nt.splitlines())} lines)[/dim cyan]")
-                                    if nt.strip():
-                                        console.print(f"[dim cyan]  [scanner] network preview: {nt[:300]!r}[/dim cyan]")
+                                    if sink:
+                                        sink.emit(f"SCAN_NETWORK: got {len(nt)} chars / {len(nt.splitlines())} lines")
+                                        if nt.strip():
+                                            sink.emit(f"SCAN_NETWORK: preview={nt[:400]!r}")
+                                    issues_before = len(issues_sink._by_fp) if hasattr(issues_sink, '_by_fp') else -1
                                     scanner.ingest_network(nav_url, nt, issues_sink)
+                                    issues_after = len(issues_sink._by_fp) if hasattr(issues_sink, '_by_fp') else -1
+                                    if sink:
+                                        sink.emit(f"SCAN_NETWORK: ingested, issues {issues_before} -> {issues_after}")
                                 except Exception as e:
-                                    msg = f"[scanner] browser_network_requests error: {e}"
-                                    console.print(f"[yellow]  {msg}[/yellow]")
+                                    msg = f"SCAN_NETWORK_ERROR: {type(e).__name__}: {e}"
                                     if sink:
                                         sink.emit(msg)
 
@@ -417,6 +433,10 @@ async def run_analysis(
     issues_list: list[Issue] = []
     if issues_sink and isinstance(issues_sink, BufferingIssueSink):
         issues_list = issues_sink.finalize()
+        if sink:
+            sink.emit(f"SCAN_FINAL: {len(issues_list)} unique issues collected by scanner")
+            for issue in issues_list[:5]:
+                sink.emit(f"  → [{issue.severity}] {issue.type}: {issue.message[:120]}")
 
     if product_id:
         from qa_agent.db import is_configured

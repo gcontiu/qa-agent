@@ -60,6 +60,24 @@ export interface IssuesSummary {
   low: number
 }
 
+export interface QuotaLimits {
+  runs_per_month: number
+  scans_per_month: number
+  scenarios_per_run: number
+}
+
+export interface QuotaUsage {
+  runs_this_month: number
+  scans_this_month: number
+}
+
+export interface Quota {
+  tier: 'free' | 'beta' | 'starter' | 'pro'
+  limits: QuotaLimits
+  usage: QuotaUsage
+  models_allowed: string[]
+}
+
 export interface Run {
   run_id: string
   status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled'

@@ -4,7 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { api } from '@/lib/api'
+import { api, QuotaError } from '@/lib/api'
+import { useQuota } from '@/contexts/quota'
+import QuotaLimitModal from '@/components/QuotaLimitModal'
 import type { Run, Product } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -64,8 +66,10 @@ function passRate(run: Run): string | null {
 export default function RunsPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { quota, refresh: refreshQuota } = useQuota()
   const [newRunOpen, setNewRunOpen] = useState(false)
   const [sourceMode, setSourceMode] = useState<SourceMode>('product')
+  const [quotaModal, setQuotaModal] = useState<{ type: 'run_blocked' | 'scan_blocked'; used: number; limit: number; tier: string } | null>(null)
 
   const { data: runs = [], isLoading } = useQuery<Run[]>({
     queryKey: ['runs'],
@@ -125,20 +129,55 @@ export default function RunsPage() {
     },
     onSuccess: (run) => {
       qc.invalidateQueries({ queryKey: ['runs'] })
+      refreshQuota()
       setNewRunOpen(false)
       reset()
       navigate(`/runs/${encodeURIComponent(run.run_id)}`)
     },
+    onError: (err) => {
+      if (err instanceof QuotaError) {
+        setNewRunOpen(false)
+        setQuotaModal({ type: err.quotaType, used: err.used, limit: err.limit, tier: err.tier })
+      }
+    },
   })
+
+  const runsUsed = quota?.usage.runs_this_month ?? 0
+  const runsLimit = quota?.limits.runs_per_month ?? 0
+  const modelsAllowed = quota?.models_allowed ?? ['claude-haiku-4-5-20251001']
+
+  const MODEL_OPTIONS = [
+    { value: 'claude-haiku-4-5-20251001', label: 'Haiku', requiredTier: 'free' },
+    { value: 'claude-sonnet-4-6',         label: 'Sonnet', requiredTier: 'starter' },
+    { value: 'claude-opus-4-7',           label: 'Opus',   requiredTier: 'pro' },
+  ]
 
   return (
     <div className="p-8 max-w-4xl">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">Runs</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Runs</h1>
+          {quota && (
+            <p className={`text-xs mt-0.5 ${runsUsed >= runsLimit ? 'text-red-400' : 'text-muted-foreground'}`}>
+              {runsUsed}/{runsLimit} runs used this month
+            </p>
+          )}
+        </div>
         <Button onClick={openDialog}>
           <Play className="h-4 w-4 mr-2" />New run
         </Button>
       </div>
+
+      {quotaModal && (
+        <QuotaLimitModal
+          open
+          onClose={() => setQuotaModal(null)}
+          type={quotaModal.type}
+          used={quotaModal.used}
+          limit={quotaModal.limit}
+          tier={quotaModal.tier}
+        />
+      )}
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -276,17 +315,19 @@ export default function RunsPage() {
                         <SelectValue placeholder="Default (Haiku — fastest, cheapest)" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="claude-haiku-4-5-20251001">
-                          Haiku
-                        </SelectItem>
-                        <SelectItem value="claude-sonnet-4-6" disabled>
-                          <span className="text-muted-foreground">Sonnet</span>
-                          <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-muted text-muted-foreground">Pro</span>
-                        </SelectItem>
-                        <SelectItem value="claude-opus-4-7" disabled>
-                          <span className="text-muted-foreground">Opus</span>
-                          <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-muted text-muted-foreground">Pro</span>
-                        </SelectItem>
+                        {MODEL_OPTIONS.map(({ value, label }) => {
+                          const allowed = modelsAllowed.includes(value)
+                          return (
+                            <SelectItem key={value} value={value} disabled={!allowed}>
+                              <span className={allowed ? '' : 'text-muted-foreground'}>{label}</span>
+                              {!allowed && (
+                                <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-muted text-muted-foreground">
+                                  Not on your plan
+                                </span>
+                              )}
+                            </SelectItem>
+                          )
+                        })}
                       </SelectContent>
                     </SelectInDialog>
                   )}

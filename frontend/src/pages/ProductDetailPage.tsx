@@ -4,7 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { api } from '@/lib/api'
+import { api, QuotaError } from '@/lib/api'
+import { useQuota } from '@/contexts/quota'
+import QuotaLimitModal from '@/components/QuotaLimitModal'
 import type { Product, Spec, AnalyzeTask } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -52,6 +54,8 @@ export default function ProductDetailPage() {
   const qc = useQueryClient()
   const [analyzeOpen, setAnalyzeOpen] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
+  const [quotaModal, setQuotaModal] = useState<{ type: 'run_blocked' | 'scan_blocked'; used: number; limit: number; tier: string } | null>(null)
+  const { quota, refresh: refreshQuota } = useQuota()
 
   const { data: product, isLoading: productLoading } = useQuery<Product>({
     queryKey: ['product', id],
@@ -102,7 +106,14 @@ export default function ProductDetailPage() {
     onSuccess: (t) => {
       setTaskId(t.task_id)
       setAnalyzeOpen(false)
+      refreshQuota()
       reset()
+    },
+    onError: (err) => {
+      if (err instanceof QuotaError) {
+        setAnalyzeOpen(false)
+        setQuotaModal({ type: err.quotaType, used: err.used, limit: err.limit, tier: err.tier })
+      }
     },
   })
 
@@ -139,12 +150,30 @@ export default function ProductDetailPage() {
             {product.url} <ExternalLink className="h-3 w-3" />
           </a>
         </div>
-        <Button onClick={openAnalyzeDialog} disabled={task?.status === 'running'}>
-          {task?.status === 'running'
-            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Analyzing…</>
-            : <><Play className="h-4 w-4 mr-2" /> Analyze</>
-          }
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button onClick={openAnalyzeDialog} disabled={task?.status === 'running'}>
+            {task?.status === 'running'
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Analyzing…</>
+              : <><Play className="h-4 w-4 mr-2" /> Analyze</>
+            }
+          </Button>
+          {quota && (
+            <span className={`text-xs ${quota.usage.scans_this_month >= quota.limits.scans_per_month ? 'text-red-400' : 'text-muted-foreground'}`}>
+              {quota.usage.scans_this_month}/{quota.limits.scans_per_month} scans this month
+            </span>
+          )}
+        </div>
+
+        {quotaModal && (
+          <QuotaLimitModal
+            open
+            onClose={() => setQuotaModal(null)}
+            type={quotaModal.type}
+            used={quotaModal.used}
+            limit={quotaModal.limit}
+            tier={quotaModal.tier}
+          />
+        )}
       </div>
 
       {product.description && (

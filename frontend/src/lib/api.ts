@@ -4,6 +4,18 @@ export function setToken(t: string | null) {
   _token = t
 }
 
+export class QuotaError extends Error {
+  constructor(
+    public readonly quotaType: 'run_blocked' | 'scan_blocked',
+    public readonly used: number,
+    public readonly limit: number,
+    public readonly tier: string,
+  ) {
+    super('quota_exceeded')
+    this.name = 'QuotaError'
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -16,6 +28,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     setToken(null)
     window.location.replace('/login')
     throw new Error('Session expired')
+  }
+  if (res.status === 429) {
+    const body = await res.json().catch(() => ({}))
+    const detail = body?.detail
+    if (detail?.code === 'quota_exceeded') {
+      throw new QuotaError(detail.type, detail.used, detail.limit, detail.tier)
+    }
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)

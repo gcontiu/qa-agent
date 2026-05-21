@@ -55,6 +55,7 @@ from qa_agent.db import jobs as db_jobs
 from qa_agent.db import products as db_products
 from qa_agent.db import specs as db_specs
 from qa_agent.db import issues as db_issues
+from qa_agent.db import quota as db_quota
 from qa_agent.issues import BufferingIssueSink
 
 def _rate_limit_key(request: Request) -> str:
@@ -91,6 +92,52 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 
 _DEFAULT_REPORTS_DIR = Path("reports")
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
+
+# ---------------------------------------------------------------------------
+# Tier limits
+# ---------------------------------------------------------------------------
+
+_TIER_LIMITS: dict[str, dict] = {
+    "free":    {"runs": 5,  "scans": 2,  "scenarios": 15, "models": ["claude-haiku-4-5-20251001"]},
+    "beta":    {"runs": 10, "scans": 3,  "scenarios": 20, "models": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"]},
+    "starter": {"runs": 20, "scans": 5,  "scenarios": 30, "models": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"]},
+    "pro":     {"runs": 50, "scans": 10, "scenarios": 75, "models": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-7"]},
+}
+_ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "anghel.contiu@gmail.com")
+
+
+async def _send_quota_email(user_email: str, event_type: str) -> None:
+    """Send a quota-limit notification via Resend. No-op if RESEND_API_KEY is unset."""
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        return
+    import httpx
+    limit_label = "test runs" if event_type == "run_blocked" else "site scans"
+    user_html = (
+        f"<p>Hi,</p>"
+        f"<p>You've used all your <strong>{limit_label}</strong> for this month on Steadra.</p>"
+        f"<p>You're clearly getting value — we'd love to hear what you think. "
+        f"Reply to this email and we'll unlock more access for you.</p>"
+        f"<p>Paid plans with higher limits are coming soon.</p>"
+        f"<p>— Anghel, Steadra</p>"
+    )
+    admin_html = (
+        f"<p><strong>{user_email}</strong> hit their <strong>{event_type}</strong> quota.</p>"
+        f"<p>Reach out — this is a hot lead.</p>"
+    )
+    async with httpx.AsyncClient(timeout=10) as client:
+        for to, subject, html in [
+            (user_email, "You've hit your Steadra beta limit", user_html),
+            (_ADMIN_EMAIL, f"[Steadra] quota hit: {user_email}", admin_html),
+        ]:
+            try:
+                await client.post(
+                    "https://api.resend.com/emails",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"from": "Steadra <noreply@steadra.dev>", "to": [to], "subject": subject, "html": html},
+                )
+            except Exception:
+                pass
 
 _SPA_ROUTE_PREFIXES = ("/products", "/runs", "/login")
 
@@ -401,6 +448,28 @@ def _assert_run_owner(state: dict, user: CurrentUser, run_id: str) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/me/quota")
+async def get_my_quota(user: CurrentUser = Depends(get_current_user)) -> dict:
+    """Return tier, limits, and current-month usage for the authenticated user."""
+    tier = await db_quota.get_tier(user.user_id)
+    limits = _TIER_LIMITS.get(tier, _TIER_LIMITS["free"])
+    runs_used = await db_quota.count_runs_this_month(user.user_id)
+    scans_used = await db_quota.count_scans_this_month(user.user_id)
+    return {
+        "tier": tier,
+        "limits": {
+            "runs_per_month": limits["runs"],
+            "scans_per_month": limits["scans"],
+            "scenarios_per_run": limits["scenarios"],
+        },
+        "usage": {
+            "runs_this_month": runs_used,
+            "scans_this_month": scans_used,
+        },
+        "models_allowed": limits["models"],
+    }
+
+
 @app.get("/spec-dirs")
 async def list_spec_dirs(
     user: CurrentUser = Depends(get_current_user),
@@ -422,6 +491,40 @@ async def create_run(
     """Start a QA run. Returns immediately with run_id; poll GET /runs/{run_id} for status."""
     if not req.spec_dir and not req.product_id:
         raise HTTPException(status_code=422, detail="Either spec_dir or product_id must be provided")
+
+    # ── Quota enforcement ────────────────────────────────────────────────────
+    tier = await db_quota.get_tier(user.user_id)
+    limits = _TIER_LIMITS.get(tier, _TIER_LIMITS["free"])
+
+    # Block disallowed models
+    if req.executor_model and req.executor_model not in limits["models"]:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Model '{req.executor_model}' is not available on the {tier} plan.",
+        )
+
+    # Enforce scenarios/run cap
+    scenarios_cap = limits["scenarios"]
+    if req.max_scenarios is None or req.max_scenarios > scenarios_cap:
+        req = req.model_copy(update={"max_scenarios": scenarios_cap})
+
+    # Enforce monthly run limit
+    runs_used = await db_quota.count_runs_this_month(user.user_id)
+    if runs_used >= limits["runs"]:
+        first_block = not await db_quota.already_notified_this_month(user.user_id, "run_blocked")
+        await db_quota.log_quota_event(user.user_id, "run_blocked")
+        if first_block:
+            asyncio.ensure_future(_send_quota_email(user.email, "run_blocked"))
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "quota_exceeded",
+                "type": "run_blocked",
+                "used": runs_used,
+                "limit": limits["runs"],
+                "tier": tier,
+            },
+        )
 
     if req.product_id:
         product = await db_products.get(req.product_id, user_id=user.user_id)
@@ -647,6 +750,26 @@ async def analyze_product(
     if not product:
         raise HTTPException(status_code=404, detail=f"Product '{product_id}' not found")
 
+    # ── Quota enforcement ────────────────────────────────────────────────────
+    tier = await db_quota.get_tier(user.user_id)
+    limits = _TIER_LIMITS.get(tier, _TIER_LIMITS["free"])
+    scans_used = await db_quota.count_scans_this_month(user.user_id)
+    if scans_used >= limits["scans"]:
+        first_block = not await db_quota.already_notified_this_month(user.user_id, "scan_blocked")
+        await db_quota.log_quota_event(user.user_id, "scan_blocked")
+        if first_block:
+            asyncio.ensure_future(_send_quota_email(user.email, "scan_blocked"))
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "quota_exceeded",
+                "type": "scan_blocked",
+                "used": scans_used,
+                "limit": limits["scans"],
+                "tier": tier,
+            },
+        )
+
     task_id = f"analyze-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}"
     state: dict = {
         "task_id": task_id,
@@ -656,6 +779,8 @@ async def analyze_product(
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     _analyses[task_id] = state
+    # Record in jobs table so monthly scan counter works
+    await db_jobs.create(task_id, f"analyze:{product_id}", user_id=user.user_id)
     asyncio.create_task(_run_analysis_task(task_id, product_id, req))
     return state
 

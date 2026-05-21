@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth'
+import { useQuota, QuotaProvider } from '@/contexts/quota'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -12,7 +13,35 @@ const NAV = [
   { to: '/runs', icon: Play, label: 'Runs' },
 ]
 
-export default function AppLayout() {
+function TierBadge() {
+  const { quota } = useQuota()
+  if (!quota) return null
+  const tier = quota.tier
+  const color =
+    tier === 'beta'    ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' :
+    tier === 'starter' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+    tier === 'pro'     ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
+                         'bg-white/5 text-gray-500 border-white/10'
+  const { runs_this_month, scans_this_month } = quota.usage
+  const { runs_per_month, scans_per_month } = quota.limits
+  return (
+    <div className="px-3 py-2 space-y-1.5">
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-medium capitalize ${color}`}>
+        {tier}
+      </span>
+      <div className="text-xs text-muted-foreground space-y-0.5">
+        <div className={runs_this_month >= runs_per_month ? 'text-red-400' : ''}>
+          {runs_this_month}/{runs_per_month} runs
+        </div>
+        <div className={scans_this_month >= scans_per_month ? 'text-red-400' : ''}>
+          {scans_this_month}/{scans_per_month} scans
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AppLayoutInner() {
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
   const email = session?.user?.email ?? ''
@@ -29,7 +58,7 @@ export default function AppLayout() {
       <aside className="w-56 flex flex-col border-r bg-sidebar">
         <div className="px-4 py-5 flex items-center gap-2">
           <LayoutDashboard className="h-5 w-5 text-sidebar-primary" />
-          <span className="font-semibold text-sidebar-foreground">qa-agent</span>
+          <span className="font-semibold text-sidebar-foreground">Steadra</span>
         </div>
         <Separator className="bg-sidebar-border" />
         <nav className="flex-1 px-2 py-3 space-y-1">
@@ -49,6 +78,8 @@ export default function AppLayout() {
             </NavLink>
           ))}
         </nav>
+        <Separator className="bg-sidebar-border" />
+        <TierBadge />
         <Separator className="bg-sidebar-border" />
         <div className="px-3 py-3">
           <DropdownMenu>
@@ -75,5 +106,13 @@ export default function AppLayout() {
         <Outlet />
       </main>
     </div>
+  )
+}
+
+export default function AppLayout() {
+  return (
+    <QuotaProvider>
+      <AppLayoutInner />
+    </QuotaProvider>
   )
 }

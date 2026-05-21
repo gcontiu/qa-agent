@@ -4,6 +4,7 @@ import { AuthProvider } from '@/contexts/auth'
 import { Toaster } from '@/components/ui/toaster'
 import AppLayout from '@/components/layout/AppLayout'
 import ProtectedRoute from '@/components/layout/ProtectedRoute'
+import LandingPage from '@/pages/LandingPage'
 import LoginPage from '@/pages/LoginPage'
 import ProductsPage from '@/pages/ProductsPage'
 import ProductDetailPage from '@/pages/ProductDetailPage'
@@ -23,6 +24,7 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
+            <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route
               element={
@@ -36,7 +38,6 @@ export default function App() {
               <Route path="/products/:id/specs/*" element={<SpecEditorPage />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/runs/:runId" element={<RunDetailPage />} />
-              <Route path="/" element={<Navigate to="/products" replace />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

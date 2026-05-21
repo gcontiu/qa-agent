@@ -829,6 +829,37 @@ async def health() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Waitlist
+# ---------------------------------------------------------------------------
+
+class _WaitlistEntry(BaseModel):
+    email: str
+
+@app.post("/waitlist", status_code=201)
+@limiter.limit("5/minute")
+async def join_waitlist(request: Request, entry: _WaitlistEntry) -> dict:
+    if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", entry.email):
+        raise HTTPException(status_code=422, detail="Invalid email")
+
+    waitlist_file = _DEFAULT_REPORTS_DIR / ".state" / "waitlist.json"
+    waitlist_file.parent.mkdir(parents=True, exist_ok=True)
+
+    entries: list[dict] = []
+    if waitlist_file.exists():
+        try:
+            entries = json.loads(waitlist_file.read_text())
+        except Exception:
+            entries = []
+
+    if any(e.get("email") == entry.email for e in entries):
+        raise HTTPException(status_code=409, detail="Already on the waitlist")
+
+    entries.append({"email": entry.email, "joined_at": datetime.now(timezone.utc).isoformat()})
+    waitlist_file.write_text(json.dumps(entries, indent=2))
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
 

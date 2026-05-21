@@ -16,6 +16,7 @@ export default defineConfig({
       '/runs': 'http://localhost:8081',
       '/spec-dirs': 'http://localhost:8081',
       '/health': 'http://localhost:8081',
+      '/waitlist': 'http://localhost:8081',
     },
   },
 })

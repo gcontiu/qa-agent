@@ -20,22 +20,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null
+    let resolved = false
+
+    function resolve(s: typeof session) {
+      if (resolved) return
+      resolved = true
+      setSession(s)
+      setToken(s?.access_token ?? null)
+      setLoading(false)
+    }
+
+    // Safety timeout — if Supabase hasn't resolved auth in 5s, unblock the app.
+    const timeout = setTimeout(() => resolve(null), 5000)
 
     getSupabaseClient().then(sb => {
       setClient(sb)
-      // onAuthStateChange fires immediately with INITIAL_SESSION event,
-      // giving us the current session (auto-refreshed if expired).
-      // We no longer call getSession() separately — that caused loading=false
-      // to fire before Supabase had a chance to refresh an expired token.
-      const { data: listener } = sb.auth.onAuthStateChange((_event, s) => {
-        setSession(s)
-        setToken(s?.access_token ?? null)
-        setLoading(false)
+
+      const { data: listener } = sb.auth.onAuthStateChange((event, s) => {
+        clearTimeout(timeout)
+
+        if (event === 'INITIAL_SESSION' && s) {
+          const expiresAt = (s.expires_at ?? 0) * 1000
+          if (expiresAt < Date.now() + 10_000) {
+            // Token expired or about to — Supabase is refreshing it.
+            // Wait for TOKEN_REFRESHED or SIGNED_OUT before unblocking.
+            return
+          }
+        }
+
+        // For all other events (SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT,
+        // or INITIAL_SESSION with a valid token) resolve immediately.
+        resolve(s)
+
+        // Keep session in sync for subsequent events after initial resolve.
+        if (resolved) {
+          setSession(s)
+          setToken(s?.access_token ?? null)
+        }
       })
+
       unsubscribe = () => listener.subscription.unsubscribe()
     })
 
-    return () => { unsubscribe?.() }
+    return () => {
+      clearTimeout(timeout)
+      unsubscribe?.()
+    }
   }, [])
 
   async function signIn(email: string, password: string) {

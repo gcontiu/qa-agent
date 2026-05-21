@@ -684,7 +684,10 @@ async def create_product(
 async def list_products(
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
-    return await db_products.list_all(user_id=user.user_id)
+    result = await db_products.list_all(user_id=user.user_id)
+    import logging
+    logging.warning(f"[DEBUG] GET /products user={user.user_id} email={user.email} count={len(result)}")
+    return result
 
 
 @app.get("/products/{product_id}")

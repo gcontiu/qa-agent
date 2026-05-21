@@ -194,12 +194,28 @@ export default function ProductDetailPage() {
             <p className="text-sm text-muted-foreground">Crawling and generating specs…</p>
           )}
           {task.status === 'done' && (
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-              {task.summary && <span>{task.summary}</span>}
+            <div className="mt-2 space-y-2">
               {task.issues_count !== undefined && (
-                <span className={task.issues_count > 0 ? 'text-amber-600 font-medium' : 'text-green-600'}>
-                  {task.issues_count > 0 ? `${task.issues_count} issue${task.issues_count !== 1 ? 's' : ''} found` : 'No issues found'}
+                <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
+                  task.issues_count > 0
+                    ? 'bg-amber-500/10 text-amber-600'
+                    : 'bg-green-500/10 text-green-600'
+                }`}>
+                  {task.issues_count > 0
+                    ? `${task.issues_count} issue${task.issues_count !== 1 ? 's' : ''} found`
+                    : 'No issues found'}
                 </span>
+              )}
+              {task.summary && (
+                <details className="group">
+                  <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground list-none flex items-center gap-1">
+                    <span className="group-open:hidden">▶ Show summary</span>
+                    <span className="hidden group-open:inline">▼ Hide summary</span>
+                  </summary>
+                  <p className="mt-2 text-sm text-muted-foreground leading-relaxed border-l-2 border-border pl-3">
+                    {task.summary}
+                  </p>
+                </details>
               )}
             </div>
           )}

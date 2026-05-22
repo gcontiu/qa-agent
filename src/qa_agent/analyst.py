@@ -396,6 +396,7 @@ async def run_analysis(
                                         sink.emit(f"SCAN_CONSOLE: ingested, issues {issues_before} -> {issues_after}")
                                 except Exception as e:
                                     msg = f"SCAN_CONSOLE_ERROR: {type(e).__name__}: {e}"
+                                    console.print(f"[red]{msg}[/red]")
                                     if sink:
                                         sink.emit(msg)
                             if _has_network_tool:
@@ -433,6 +434,7 @@ async def run_analysis(
         browserbase.delete_session(bb_session_id)
 
     issues_list: list[Issue] = []
+    console.print(f"[dim]SCAN_DEBUG: issues_sink={issues_sink!r} is_buf={isinstance(issues_sink, BufferingIssueSink)}[/dim]")
     if issues_sink and isinstance(issues_sink, BufferingIssueSink):
         issues_list = issues_sink.finalize()
         scan_summary = f"SCAN_FINAL: {len(issues_list)} unique issues collected by scanner"

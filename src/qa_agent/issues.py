@@ -99,9 +99,6 @@ class BufferingIssueSink:
     def finalize(self) -> list[Issue]:
         return list(self._by_fp.values())
 
-    def __len__(self) -> int:
-        return len(self._by_fp)
-
 
 class DeterministicScanner:
     """

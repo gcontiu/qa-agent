@@ -75,9 +75,9 @@ async def main() -> None:
                     console_out = await call(session, "browser_console_messages", {})
                     print(f"\n[browser_console_messages] raw output ({len(console_out)} chars):")
                     print(console_out[:1000] if console_out.strip() else "  (empty)")
-                    issues_before = len(sink)
+                    issues_before = len(sink._by_fp)
                     scanner.ingest_console(url, console_out, sink)
-                    print(f"→ scanner found {len(sink) - issues_before} new issue(s) from console")
+                    print(f"→ scanner found {len(sink._by_fp) - issues_before} new issue(s) from console")
                 else:
                     print("[browser_console_messages] SKIPPED — tool not available")
 
@@ -85,16 +85,16 @@ async def main() -> None:
                     network_out = await call(session, "browser_network_requests", {})
                     print(f"\n[browser_network_requests] raw output ({len(network_out)} chars):")
                     print(network_out[:1000] if network_out.strip() else "  (empty)")
-                    issues_before = len(sink)
+                    issues_before = len(sink._by_fp)
                     scanner.ingest_network(url, network_out, sink)
-                    print(f"→ scanner found {len(sink) - issues_before} new issue(s) from network")
+                    print(f"→ scanner found {len(sink._by_fp) - issues_before} new issue(s) from network")
                 else:
                     print("[browser_network_requests] SKIPPED — tool not available")
 
                 print()
 
             print(f"{'='*60}")
-            print(f"TOTAL ISSUES FOUND: {len(sink)}")
+            print(f"TOTAL ISSUES FOUND: {len(sink._by_fp)}")
             print(f"{'='*60}")
             for issue in sink.finalize():
                 print(f"  [{issue.severity.upper()}] {issue.type} @ {issue.url}")

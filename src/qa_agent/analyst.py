@@ -341,7 +341,7 @@ async def run_analysis(
 
                     elif name == "report_issue":
                         issue = DeterministicScanner.from_report_issue_args(_current_url, args)
-                        if issues_sink:
+                        if issues_sink is not None:
                             issues_sink.add(issue)
                         msg_preview = args.get("message", "")[:60]
                         console.print(
@@ -374,7 +374,7 @@ async def run_analysis(
                         # After navigation: run deterministic issue scanner
                         if sink:
                             sink.emit(f"SCAN_CHECK: name={name!r} issues_sink={issues_sink is not None} has_console={_has_console_tool} has_network={_has_network_tool}")
-                        if name == "browser_navigate" and issues_sink:
+                        if name == "browser_navigate" and issues_sink is not None:
                             nav_url = args.get("url", _current_url)
                             _current_url = nav_url
                             if sink:
@@ -435,7 +435,7 @@ async def run_analysis(
 
     issues_list: list[Issue] = []
     print(f"SCAN_DEBUG: issues_sink={issues_sink!r} is_buf={isinstance(issues_sink, BufferingIssueSink)}", flush=True)
-    if issues_sink and isinstance(issues_sink, BufferingIssueSink):
+    if issues_sink is not None and isinstance(issues_sink, BufferingIssueSink):
         issues_list = issues_sink.finalize()
         scan_summary = f"SCAN_FINAL: {len(issues_list)} unique issues collected by scanner"
         print(scan_summary, flush=True)

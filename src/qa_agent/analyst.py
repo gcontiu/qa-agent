@@ -269,10 +269,12 @@ async def run_analysis(
 
             start = time.monotonic()
 
+            llm_error: Exception | None = None
             for turn in range(MAX_TURNS):
                 try:
                     response = complete(config, messages, tools=all_tools, max_tokens=4096, _usage=usage)
                 except Exception as e:
+                    llm_error = e
                     console.print(f"[red]LLM error on turn {turn}: {e}[/red]")
                     if sink:
                         sink.emit(f"LLM error on turn {turn}: {e}")
@@ -433,10 +435,15 @@ async def run_analysis(
     issues_list: list[Issue] = []
     if issues_sink and isinstance(issues_sink, BufferingIssueSink):
         issues_list = issues_sink.finalize()
+        scan_summary = f"SCAN_FINAL: {len(issues_list)} unique issues collected by scanner"
+        console.print(f"[dim]{scan_summary}[/dim]")
         if sink:
-            sink.emit(f"SCAN_FINAL: {len(issues_list)} unique issues collected by scanner")
-            for issue in issues_list[:5]:
-                sink.emit(f"  → [{issue.severity}] {issue.type}: {issue.message[:120]}")
+            sink.emit(scan_summary)
+        for issue in issues_list[:5]:
+            line = f"  → [{issue.severity}] {issue.type}: {issue.message[:120]}"
+            console.print(f"[dim]{line}[/dim]")
+            if sink:
+                sink.emit(line)
 
     if product_id:
         from qa_agent.db import is_configured
@@ -488,6 +495,10 @@ async def run_analysis(
         ),
         border_style="green" if finished else "yellow",
     ))
+
+    # If LLM failed on the very first turn (nothing was explored), surface the error
+    if llm_error is not None and not written_files and finished is None:
+        raise RuntimeError(f"Analysis failed: LLM error on turn 0 — {llm_error}") from llm_error
 
     return {
         "url": url,

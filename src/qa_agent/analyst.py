@@ -434,16 +434,16 @@ async def run_analysis(
         browserbase.delete_session(bb_session_id)
 
     issues_list: list[Issue] = []
-    console.print(f"[dim]SCAN_DEBUG: issues_sink={issues_sink!r} is_buf={isinstance(issues_sink, BufferingIssueSink)}[/dim]")
+    print(f"SCAN_DEBUG: issues_sink={issues_sink!r} is_buf={isinstance(issues_sink, BufferingIssueSink)}", flush=True)
     if issues_sink and isinstance(issues_sink, BufferingIssueSink):
         issues_list = issues_sink.finalize()
         scan_summary = f"SCAN_FINAL: {len(issues_list)} unique issues collected by scanner"
-        console.print(f"[dim]{scan_summary}[/dim]")
+        print(scan_summary, flush=True)
         if sink:
             sink.emit(scan_summary)
         for issue in issues_list[:5]:
-            line = f"  → [{issue.severity}] {issue.type}: {issue.message[:120]}"
-            console.print(f"[dim]{line}[/dim]")
+            line = f"  -> [{issue.severity}] {issue.type}: {issue.message[:120]}"
+            print(line, flush=True)
             if sink:
                 sink.emit(line)
 

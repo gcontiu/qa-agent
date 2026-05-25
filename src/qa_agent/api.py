@@ -50,13 +50,18 @@ from qa_agent.llm import LLMConfig
 from qa_agent.reporter import write_run
 from qa_agent.specs import load_spec
 from qa_agent.state import StateStore
-from qa_agent.db import init as db_init, close as db_close
+from qa_agent.db import init as db_init, close as db_close, get_pool as db_get_pool
 from qa_agent.db import jobs as db_jobs
 from qa_agent.db import products as db_products
 from qa_agent.db import specs as db_specs
 from qa_agent.db import issues as db_issues
 from qa_agent.db import quota as db_quota
 from qa_agent.issues import BufferingIssueSink
+from qa_agent.growth import BetaFunnel, FunnelConfig
+from qa_agent.growth.providers.email import from_env as _email_from_env
+from qa_agent.growth.providers.notify import from_env as _notify_from_env
+from qa_agent.growth.providers.antiabuse import from_env as _antiabuse_from_env
+from qa_agent.integrations.growth_hooks import QAAgentHooks
 
 def _rate_limit_key(request: Request) -> str:
     """Rate-limit key: user UUID from JWT when available, fallback to client IP."""
@@ -208,9 +213,32 @@ async def _ensure_dev_user() -> None:
         )
 
 
+async def _require_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """FastAPI dependency: allow only admin-tier users."""
+    tier = await db_quota.get_tier(user.user_id)
+    if tier != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+_funnel = BetaFunnel(
+    config=FunnelConfig(admin_email=os.getenv("ADMIN_EMAIL", "")),
+    hooks=QAAgentHooks(),
+    email=_email_from_env(),
+    notify=_notify_from_env(),
+    antiabuse=_antiabuse_from_env(),
+    admin_guard=_require_admin,
+)
+app.include_router(_funnel.router)
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     await db_init()
+    _funnel._db = db_get_pool()
+    from qa_agent.growth.db import set_pool as _growth_set_pool
+    _growth_set_pool(db_get_pool())
+    await _funnel.start_workers()
     await _ensure_dev_user()
     await db_jobs.mark_interrupted()
     for status_file in _DEFAULT_REPORTS_DIR.glob("run-*/run_status.json"):
@@ -229,6 +257,7 @@ async def _startup() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
+    await _funnel.stop_workers()
     await db_close()
 
 
@@ -970,41 +999,7 @@ async def health() -> dict:
     return {"status": "ok", "version": "0.1.0"}
 
 
-# ---------------------------------------------------------------------------
-# Waitlist
-# ---------------------------------------------------------------------------
-
-class _WaitlistEntry(BaseModel):
-    email: str
-    url: str | None = None
-
-@app.post("/waitlist", status_code=201)
-@limiter.limit("5/minute")
-async def join_waitlist(request: Request, entry: _WaitlistEntry) -> dict:
-    if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", entry.email):
-        raise HTTPException(status_code=422, detail="Invalid email")
-    if entry.url and not re.match(r"^https?://", entry.url):
-        raise HTTPException(status_code=422, detail="URL must start with http:// or https://")
-
-    waitlist_file = _DEFAULT_REPORTS_DIR / ".state" / "waitlist.json"
-    waitlist_file.parent.mkdir(parents=True, exist_ok=True)
-
-    entries: list[dict] = []
-    if waitlist_file.exists():
-        try:
-            entries = json.loads(waitlist_file.read_text())
-        except Exception:
-            entries = []
-
-    if any(e.get("email") == entry.email for e in entries):
-        raise HTTPException(status_code=409, detail="Already on the waitlist")
-
-    record: dict = {"email": entry.email, "joined_at": datetime.now(timezone.utc).isoformat()}
-    if entry.url:
-        record["url"] = entry.url
-    entries.append(record)
-    waitlist_file.write_text(json.dumps(entries, indent=2))
-    return {"status": "ok"}
+# /waitlist is now handled by the growth module router (see _funnel.router)
 
 
 # ---------------------------------------------------------------------------

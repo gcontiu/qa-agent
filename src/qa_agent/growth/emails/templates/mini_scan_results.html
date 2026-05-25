@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>{{ n }} issue{{ 's' if n != 1 else '' }} found on {{ domain }}</title>
+<style>
+  body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e5e5e5; }
+  .wrap { max-width: 560px; margin: 40px auto; padding: 32px; background: #1a1a1a; border-radius: 12px; border: 1px solid #2a2a2a; }
+  h1 { font-size: 22px; color: #fff; margin: 0 0 8px; }
+  .sub { font-size: 15px; color: #aaa; margin: 0 0 24px; }
+  .url { font-family: monospace; font-size: 13px; color: #7c7cff; background: #1e1e33; padding: 4px 10px; border-radius: 6px; display: inline-block; margin-bottom: 24px; }
+  .issue { padding: 12px 16px; margin-bottom: 10px; border-radius: 8px; border-left: 3px solid #555; background: #222; }
+  .issue.critical { border-color: #ef4444; }
+  .issue.warning { border-color: #f59e0b; }
+  .issue.info { border-color: #3b82f6; }
+  .sev { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .sev.critical { color: #ef4444; }
+  .sev.warning { color: #f59e0b; }
+  .sev.info { color: #60a5fa; }
+  .msg { font-size: 14px; color: #ddd; }
+  .loc { font-size: 12px; color: #666; margin-top: 4px; font-family: monospace; }
+  .cta { display: block; margin: 28px 0 0; padding: 14px 24px; background: #4f46e5; color: #fff; text-decoration: none; border-radius: 8px; text-align: center; font-weight: 600; font-size: 15px; }
+  .stats { display: flex; gap: 24px; margin-bottom: 24px; }
+  .stat { text-align: center; }
+  .stat .n { font-size: 28px; font-weight: 700; color: #fff; }
+  .stat .l { font-size: 12px; color: #666; }
+  .footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid #2a2a2a; font-size: 12px; color: #555; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>We found {{ n }} issue{{ 's' if n != 1 else '' }}</h1>
+    <p class="sub">Here's what Steadra found on <strong>{{ domain }}</strong></p>
+
+    <div class="stats">
+      <div class="stat"><div class="n">{{ n }}</div><div class="l">total issues</div></div>
+      <div class="stat"><div class="n">{{ result.page_count }}</div><div class="l">pages crawled</div></div>
+      <div class="stat"><div class="n">{{ (result.duration_ms // 1000) }}s</div><div class="l">scan time</div></div>
+    </div>
+
+    {% for issue in result.issues[:8] %}
+    <div class="issue {{ issue.severity }}">
+      <div class="sev {{ issue.severity }}">{{ issue.severity }}</div>
+      <div class="msg">{{ issue.message }}</div>
+      {% if issue.location %}<div class="loc">{{ issue.location }}</div>{% endif %}
+    </div>
+    {% endfor %}
+
+    {% if result.issues | length > 8 %}
+    <p style="color:#666;font-size:13px;text-align:center;">+ {{ result.issues | length - 8 }} more issues in the full report</p>
+    {% endif %}
+
+    <p style="margin-top:24px;color:#aaa;font-size:14px;">
+      We'll follow up with an invitation to set up automated regression tests — so you catch new issues before your users do.
+    </p>
+
+    <a href="https://steadra.dev" class="cta">Join the beta — fix these before they cost you</a>
+
+    <div class="footer">
+      You're receiving this because you signed up at steadra.dev.<br />
+      Reply to this email with questions or to opt out.
+    </div>
+  </div>
+</body>
+</html>

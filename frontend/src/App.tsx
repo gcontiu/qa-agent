@@ -11,6 +11,7 @@ import ProductDetailPage from '@/pages/ProductDetailPage'
 import SpecEditorPage from '@/pages/SpecEditorPage'
 import RunsPage from '@/pages/RunsPage'
 import RunDetailPage from '@/pages/RunDetailPage'
+import { AdminGrowthRoutes } from '@/growth/routes'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +39,7 @@ export default function App() {
               <Route path="/products/:id/specs/*" element={<SpecEditorPage />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/runs/:runId" element={<RunDetailPage />} />
+              <Route path="/admin/growth/*" element={<AdminGrowthRoutes />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

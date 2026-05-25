@@ -6,12 +6,44 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { LayoutDashboard, Package, Play, LogOut } from 'lucide-react'
+import { LayoutDashboard, Package, Play, LogOut, TrendingUp } from 'lucide-react'
 
 const NAV = [
   { to: '/products', icon: Package, label: 'Products' },
   { to: '/runs', icon: Play, label: 'Runs' },
 ]
+
+const ADMIN_NAV = [
+  { to: '/admin/growth', icon: TrendingUp, label: 'Growth' },
+]
+
+function AdminNav() {
+  const { quota } = useQuota()
+  if (quota?.tier !== 'admin') return null
+  return (
+    <>
+      <Separator className="bg-sidebar-border" />
+      <div className="px-2 py-2">
+        <p className="px-3 pb-1 text-xs font-semibold text-slate-600 uppercase tracking-wider">Admin</p>
+        {ADMIN_NAV.map(({ to, icon: Icon, label }) => (
+          <NavLink key={to} to={to}>
+            {({ isActive }) => (
+              <span className={cn(
+                'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+                isActive
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
+              )}>
+                <Icon className="h-4 w-4" />
+                {label}
+              </span>
+            )}
+          </NavLink>
+        ))}
+      </div>
+    </>
+  )
+}
 
 function TierBadge() {
   const { quota, isLoading } = useQuota()
@@ -79,6 +111,7 @@ function AppLayoutInner() {
             </NavLink>
           ))}
         </nav>
+        <AdminNav />
         <Separator className="bg-sidebar-border" />
         <TierBadge />
         <Separator className="bg-sidebar-border" />

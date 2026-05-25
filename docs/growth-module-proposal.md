@@ -1,8 +1,185 @@
 # Growth module — implementation proposal
 
-> Status: **Proposal — not yet implemented**
+> Status: **Phase 1 + 2 implemented** (commit `64b8d1e`)
 > Owner: anghel@steadra.dev
 > Scope: items #1–#11 of the Build order in `docs/sales-and-marketing.md`
+
+## High-level architecture — as implemented
+
+> This section documents what was actually built in Phase 1 + 2. It supersedes
+> the exploratory sketches in the sections below wherever they diverge.
+
+### System context
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Fly.io VM (qa-agent process)                               │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  FastAPI app  (src/qa_agent/api.py)                  │  │
+│  │                                                      │  │
+│  │   app.include_router(funnel.router)                  │  │
+│  │   ├── POST  /waitlist           ← public             │  │
+│  │   └── GET/POST /admin/growth/*  ← admin-gated        │  │
+│  │                                                      │  │
+│  │   asyncio tasks (started at @app.on_event startup)   │  │
+│  │   └── ScanWorker  (10s poll loop)                    │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                  │ asyncpg pool (shared)                    │
+└──────────────────┼──────────────────────────────────────────┘
+                   │
+         ┌─────────▼─────────┐
+         │  Supabase Postgres │
+         │  schema: public    │  ← host tables (users, products, jobs)
+         │  schema: growth    │  ← module tables (waitlist, drip_jobs, …)
+         └───────────────────┘
+```
+
+The growth module runs **in-process** with the FastAPI server — no separate worker process, no message broker. In-process `asyncio.create_task` is sufficient until daily scan volume exceeds ~100/day, at which point the scan worker moves to a separate Fly machine.
+
+---
+
+### Infrastructure
+
+| Concern | Choice | Rationale |
+|---|---|---|
+| Runtime | In-process asyncio worker | Zero infra overhead; extractable later |
+| Queue durability | Postgres `growth.drip_jobs` + `FOR UPDATE SKIP LOCKED` | Already have Postgres; no Redis/RabbitMQ until needed |
+| Worker poll interval | 10 seconds | Low latency for scan start; cheap on idle |
+| DB isolation | Dedicated `growth` schema | No table-name collisions; `DROP SCHEMA growth CASCADE` removes module cleanly |
+| Email | Resend (prod) / ConsoleProvider (dev) | Auto-selected by `from_env()` via `RESEND_API_KEY` presence |
+| Notifications | Slack webhook (prod) / ConsoleNotifyProvider (dev) | Auto-selected by `SLACK_FOUNDER_WEBHOOK` |
+| Anti-abuse | `CompositeGuard(IPRateLimit, DisposableBlocklist, MXCheck)` | Turnstile added when `TURNSTILE_SECRET` is set |
+| Templates | Jinja2 HTML | Fits in-repo; no external email builder dependency |
+| Dependencies added | `dnspython>=2.6.0`, `jinja2>=3.1.0` | Only new pyproject.toml entries |
+
+---
+
+### API surface
+
+**Public (no auth):**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/waitlist` | Submit email + URL; anti-abuse checks, segment detection, daily cap check, returns `{status, id}` |
+
+**Admin (requires `tier == 'admin'`):**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/admin/growth/overview` | Dashboard KPIs: total waitlist, today's scan count, last 10 signups |
+| `GET` | `/admin/growth/waitlist` | Paginated list; filters: scan_status, invite_status, segment, q |
+| `GET` | `/admin/growth/waitlist/:id` | Full per-user timeline payload: entry state + drip jobs + host_summary + cost_summary |
+| `POST` | `/admin/growth/waitlist/:id/force-rescan` | Reset scan_status to 'pending' (bypasses daily cap) |
+| `POST` | `/admin/growth/waitlist/:id/skip-next-drip` | Mark next pending drip job as 'skipped' |
+| `GET` | `/admin/growth/drip` | Drip job queue; filter by status |
+
+Auth gate is a FastAPI `Depends(admin_guard)` injected at `BetaFunnel` construction — growth never imports the host's auth code.
+
+---
+
+### Integration boundary
+
+Only two files cross the module boundary:
+
+```
+src/qa_agent/api.py                     ← wires funnel into the app
+src/qa_agent/integrations/growth_hooks.py  ← QAAgentHooks (the only host-specific code)
+```
+
+**`api.py` wiring (5 lines):**
+```python
+_funnel = BetaFunnel(config=..., hooks=QAAgentHooks(), email=..., notify=...,
+                     antiabuse=..., admin_guard=_require_admin)
+app.include_router(_funnel.router)
+# startup: _growth_set_pool(db_get_pool()); await _funnel.start_workers()
+# shutdown: await _funnel.stop_workers()
+```
+
+**`QAAgentHooks` — the 4 mandatory + 2 optional methods:**
+
+```
+run_mini_scan()          → wraps run_analysis(model='claude-opus-4-7', 60s cap)
+seed_user_account()      → creates product + seeds specs from scan_result (idempotent)
+grant_tier()             → UPDATE users SET tier = $2
+revoke_tier()            → grant_tier(user_id, 'free')
+get_host_summary()       → queries jobs table: total_runs, completed_runs, last_run_at
+get_user_cost_summary()  → queries jobs table: SUM(cost_usd), run_count
+```
+
+The last two are optional — growth degrades gracefully if they return `None`.
+
+---
+
+### DB pool sharing
+
+The host's asyncpg pool (created by `qa_agent.db.init()` at startup) is passed into the growth module at startup via:
+
+```python
+from qa_agent.growth.db import set_pool as _growth_set_pool
+_growth_set_pool(db_get_pool())
+```
+
+Growth uses this pool through its own `growth.db.get_pool()` accessor. The two schemas share one connection pool — no second connection overhead.
+
+---
+
+### Anti-abuse pipeline
+
+Every `POST /waitlist` request passes through this pipeline in order:
+
+```
+1. Turnstile token verify   (if TURNSTILE_SECRET set; otherwise skipped)
+2. Email format check       (regex — always)
+3. Disposable domain check  (in-memory blocklist — always)
+4. MX record check          (DNS lookup — always)
+5. IP rate-limit            (3/hour sliding window, in-memory — always)
+6. DB duplicate check       (email UNIQUE — always)
+7. Daily cap check          (growth.daily_counters — marks 'capped', doesn't block)
+```
+
+Steps 1–6 return HTTP 422/429 and block the submission. Step 7 stores the row with `scan_status='capped'` — the user gets on the waitlist but the scan is queued for the next day.
+
+---
+
+### Scan worker flow
+
+```
+every 10s:
+  if daily_counters['mini_scans'] >= 20 → skip
+  row = claim_next_pending_scan()   ← FOR UPDATE SKIP LOCKED (one worker safe)
+  if none → skip
+
+  send "mini_scan_running" email (T+0)
+  notify founder via Slack
+  run hooks.run_mini_scan(url) with asyncio.wait_for(60s)
+    → on timeout  → mark_scan_failed('timeout')
+    → on error    → mark_scan_failed(str(exc))
+    → on success  → mark_scan_done(result)
+                    increment daily_counters['mini_scans']
+                    send "mini_scan_results" email with issues list
+                    mark_scan_email_sent
+                    schedule drip job 'invite' at T+24h
+```
+
+`scan_cost_usd` is written by `MiniScanResult.cost_usd` which `QAAgentHooks.run_mini_scan` populates from the Anthropic API usage response (`result.cost_usd`).
+
+---
+
+### Key architectural decisions
+
+| Decision | Choice | Alternative rejected | Why |
+|---|---|---|---|
+| Schema isolation | `growth.*` schema | Prefixed tables (`growth_waitlist`) | `DROP SCHEMA CASCADE` removes module; no name collisions |
+| Worker model | In-process `asyncio.create_task` | Separate Fly process group | Zero infra overhead for Phase 1-2 volume |
+| Queue backend | Postgres `FOR UPDATE SKIP LOCKED` | Redis/RabbitMQ | Avoids new infra; durability is sufficient |
+| Duplicate submit | `{status: 'already_queued'}` 200 | 409 error | Friendlier UX; cheaper (no re-scan) |
+| Admin auth gate | Injected `FastAPI.Depends` callable | Hard-coded tier check inside growth | Growth stays auth-agnostic; host decides who's admin |
+| Cost boundary | Growth owns `scan_cost_usd`; host owns `jobs.cost_usd` | Single cost table | Each schema owns what it caused; clean on extraction |
+| Provider selection | `from_env()` factory per provider | Config file | Twelve-factor; no config format to maintain |
+| No double opt-in | Confirmed email via MX check only | Confirmation email | MX + disposable blocklist catches ~95% junk; 20-30% drop from double opt-in unacceptable |
+
+---
 
 ## Why a separate module
 

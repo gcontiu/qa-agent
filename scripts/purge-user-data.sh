@@ -12,9 +12,27 @@ if [[ -z "$EMAIL" ]]; then
   exit 1
 fi
 
+# supabase db query writes "Initialising login role..." and version warnings to stdout,
+# mixed with the JSON payload. Extract only the JSON object from the output.
+_db_query() {
+  supabase db query "$1" --linked 2>/dev/null \
+    | python3 -c "
+import sys, json, re
+text = sys.stdin.read()
+m = re.search(r'\{.*\}', text, re.DOTALL)
+if m:
+    print(m.group())
+"
+}
+
+_json_field() {
+  # _json_field <json> <key>
+  python3 -c "import sys,json; d=json.loads(sys.argv[1]); rows=d.get('rows',[]); print(rows[0].get(sys.argv[2],'') if rows else '')" "$1" "$2" 2>/dev/null || true
+}
+
 echo "==> Looking up user: $EMAIL"
-RESULT=$(supabase db query "SELECT id FROM public.users WHERE email = '${EMAIL}';" --linked 2>/dev/null)
-USER_ID=$(echo "$RESULT" | python3 -c "import sys,json; rows=json.load(sys.stdin).get('rows',[]); print(rows[0]['id'] if rows else '')" 2>/dev/null || true)
+RESULT=$(_db_query "SELECT id FROM public.users WHERE email = '${EMAIL}';")
+USER_ID=$(_json_field "$RESULT" "id")
 
 if [[ -z "$USER_ID" ]]; then
   echo "Error: user '$EMAIL' not found in DB." >&2
@@ -24,26 +42,25 @@ fi
 echo "    user_id: $USER_ID"
 
 echo "==> Counting records to delete..."
-COUNTS=$(supabase db query "
+COUNTS=$(_db_query "
 SELECT
   (SELECT COUNT(*) FROM jobs     WHERE user_id   = '${USER_ID}') AS runs,
   (SELECT COUNT(*) FROM products WHERE user_id   = '${USER_ID}') AS products,
   (SELECT COUNT(*) FROM specs    WHERE product_id IN (SELECT id FROM products WHERE user_id = '${USER_ID}')) AS specs,
   (SELECT COUNT(*) FROM issues   WHERE product_id IN (SELECT id FROM products WHERE user_id = '${USER_ID}')) AS issues;
-" --linked 2>/dev/null)
-
+")
 python3 -c "
 import sys, json
-rows = json.loads('''${COUNTS}''').get('rows', [{}])
-r = rows[0] if rows else {}
+d = json.loads(sys.argv[1])
+r = (d.get('rows') or [{}])[0]
 print(f\"    runs={r.get('runs',0)}  products={r.get('products',0)}  specs={r.get('specs',0)}  issues={r.get('issues',0)}\")
-" 2>/dev/null || echo "$COUNTS"
+" "$COUNTS"
 
 echo "==> Deleting from DB..."
-supabase db query "
+_db_query "
 DELETE FROM jobs     WHERE user_id = '${USER_ID}';
 DELETE FROM products WHERE user_id = '${USER_ID}';
-" --linked 2>/dev/null
+" > /dev/null
 echo "    DB: done."
 
 echo "==> Deleting run files from Fly volume ($FLY_APP)..."

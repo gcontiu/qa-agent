@@ -1,3 +1,27 @@
+## Landing page changes
+
+Task list for the landing page rewrite. Items marked `[x]` are implemented in code. Items marked `[ ]` require assets or external setup from the founder.
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1 | URL field (mandatory) in form + backend `_WaitlistEntry` model updated to store `url` | [x] Done | |
+| 2 | H1 rewrite with QA-junior anchor: "Your on-demand QA junior." | [x] Done | |
+| 3 | Subhead: "Point it at a URL, get a prioritized bug report in minutes. No hiring, no test scripts." | [x] Done | |
+| 4 | Success state: "We're scanning {url} right now — report in ~10 min" | [x] Done | |
+| 5 | CTA button: "Get early access →" + scarcity counter "27 of 50 spots claimed this month" | [x] Done | Update `SPOTS_CLAIMED` const in `LandingPage.tsx` manually or wire to API |
+| 6 | Remove placeholder screenshot → mock issues preview (styled dark UI with 5 sample issues) | [x] Done | |
+| 7 | Segmentation chips (E-commerce / SaaS / Agency) below hero — swap tagline on click | [x] Done | |
+| 8 | Privacy microcopy under form: "We only scan public pages. No login required. Report is private to you." | [x] Done | |
+| 9 | Founder note section with initials avatar, quote, name, Calendly CTA | [x] Done (partial) | Needs: (a) real founder photo → replace initials `div` with `<img>` in `LandingPage.tsx:FOUNDER_NOTE`; (b) Calendly URL → replace `CALENDLY_URL` const |
+| 10 | Pricing subtitle reframed for beta: "Beta cohort gets locked-in pricing — pay nothing during your 30-day trial." | [x] Done | |
+| 11 | FAQ section (4 Q&As: vs Lighthouse/Cypress, pages crawled, data storage, invite timing) | [x] Done | |
+| 12 | Footer: Privacy + Terms + hello@steadra.dev links | [x] Done | |
+| 13 | Fix passive CTA under pricing: "Get my free mini-scan + early access" | [x] Done | |
+| 14 | Real screenshot / GIF recording of an actual Steadra run | [ ] Needs founder | Record a run on a real site; replace mock report section or add above it |
+| 15 | Social proof strip (testimonial + logo) | [ ] Needs beta users | Add after first 5 beta users complete 3+ runs with NPS ≥4 |
+
+---
+
 ## Landing page
 
 # the one sentence

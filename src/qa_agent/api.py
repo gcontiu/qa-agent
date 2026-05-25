@@ -976,12 +976,15 @@ async def health() -> dict:
 
 class _WaitlistEntry(BaseModel):
     email: str
+    url: str | None = None
 
 @app.post("/waitlist", status_code=201)
 @limiter.limit("5/minute")
 async def join_waitlist(request: Request, entry: _WaitlistEntry) -> dict:
     if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", entry.email):
         raise HTTPException(status_code=422, detail="Invalid email")
+    if entry.url and not re.match(r"^https?://", entry.url):
+        raise HTTPException(status_code=422, detail="URL must start with http:// or https://")
 
     waitlist_file = _DEFAULT_REPORTS_DIR / ".state" / "waitlist.json"
     waitlist_file.parent.mkdir(parents=True, exist_ok=True)
@@ -996,7 +999,10 @@ async def join_waitlist(request: Request, entry: _WaitlistEntry) -> dict:
     if any(e.get("email") == entry.email for e in entries):
         raise HTTPException(status_code=409, detail="Already on the waitlist")
 
-    entries.append({"email": entry.email, "joined_at": datetime.now(timezone.utc).isoformat()})
+    record: dict = {"email": entry.email, "joined_at": datetime.now(timezone.utc).isoformat()}
+    if entry.url:
+        record["url"] = entry.url
+    entries.append(record)
     waitlist_file.write_text(json.dumps(entries, indent=2))
     return {"status": "ok"}
 

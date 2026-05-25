@@ -15,6 +15,13 @@ from ..providers.antiabuse import AntiAbuseGuard
 from ..providers.notify import NotificationProvider
 
 
+class WaitlistSubmit(BaseModel):
+    email: str
+    url: str | None = None
+    turnstile_token: str | None = None
+    segment: str | None = None
+
+
 def make_router(
     config: FunnelConfig,
     hooks: FunnelHooks,
@@ -23,14 +30,8 @@ def make_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    class _Entry(BaseModel):
-        email: str
-        url: str | None = None
-        turnstile_token: str | None = None
-        segment: str | None = None
-
     @router.post("/waitlist", status_code=201)
-    async def join_waitlist(request: Request, entry: _Entry) -> dict:
+    async def join_waitlist(request: Request, entry: WaitlistSubmit) -> dict:
         email = entry.email.strip().lower()
 
         if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$", email):

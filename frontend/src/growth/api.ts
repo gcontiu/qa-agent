@@ -9,6 +9,7 @@ export interface WaitlistEntry {
   email: string
   url: string | null
   segment: string | null
+  ip: string | null
   submitted_at: string
   scan_status: 'pending' | 'running' | 'done' | 'failed' | 'capped'
   scan_started_at: string | null

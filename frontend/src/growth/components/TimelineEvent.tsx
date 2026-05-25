@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, AlertCircle, XCircle } from 'lucide-react'
+import { CheckCircle2, Clock, XCircle } from 'lucide-react'
 
 export type EventStatus = 'done' | 'pending' | 'failed' | 'running'
 
@@ -7,7 +7,6 @@ interface TimelineEventProps {
   timestamp: string | null
   title: string
   details?: Record<string, string | number | null | undefined>
-  raw?: unknown
 }
 
 const STATUS_ICON = {
@@ -25,7 +24,7 @@ function fmt(ts: string | null) {
   })
 }
 
-export function TimelineEvent({ status, timestamp, title, details, raw }: TimelineEventProps) {
+export function TimelineEvent({ status, timestamp, title, details }: TimelineEventProps) {
   const isPast = status === 'done' || status === 'failed'
   return (
     <div className={`flex gap-3 ${!isPast ? 'opacity-50' : ''}`}>

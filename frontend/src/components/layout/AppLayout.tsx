@@ -19,7 +19,7 @@ const ADMIN_NAV = [
 
 function AdminNav() {
   const { quota } = useQuota()
-  if (quota?.tier !== 'admin') return null
+  if ((quota?.tier as string) !== 'admin') return null
   return (
     <>
       <Separator className="bg-sidebar-border" />

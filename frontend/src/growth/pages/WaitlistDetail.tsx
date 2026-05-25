@@ -4,12 +4,12 @@ import { growthApi } from '../api'
 import { Timeline } from '../components/Timeline'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, RefreshCw, SkipForward } from 'lucide-react'
-import { useToast } from '@/components/ui/toaster'
+import { useToast } from '@/hooks/use-toast'
 
 export default function WaitlistDetail() {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
-  const { toast } = useToast?.() ?? { toast: () => {} }
+  const { toast } = useToast()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['growth-waitlist-detail', id],
@@ -21,7 +21,7 @@ export default function WaitlistDetail() {
     mutationFn: () => growthApi.forceRescan(id!),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['growth-waitlist-detail', id] })
-      toast?.({ title: 'Re-scan queued' })
+      toast({ title: 'Re-scan queued' })
     },
   })
 
@@ -29,7 +29,7 @@ export default function WaitlistDetail() {
     mutationFn: () => growthApi.skipNextDrip(id!),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['growth-waitlist-detail', id] })
-      toast?.({ title: 'Next drip skipped' })
+      toast({ title: 'Next drip skipped' })
     },
   })
 

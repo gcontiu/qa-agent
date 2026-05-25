@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowRight, CheckCircle2, Zap, ListChecks, Moon, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Zap, ListChecks, Moon, Check, ChevronDown, ChevronUp, User } from 'lucide-react'
 
 const SPOTS_TOTAL = 50
 const SPOTS_CLAIMED = 27
@@ -110,9 +110,9 @@ export default function LandingPage() {
             <span className="text-cyan-400">QA junior.</span>
           </h1>
 
-          <p className="text-lg font-medium text-gray-300 mb-4">
-            Point it at a URL, get a prioritized bug report in minutes.<br />
-            No hiring, no test scripts.
+          <p className="text-lg font-medium text-gray-300 mb-4 max-w-2xl mx-auto">
+            Scans your site for bugs in minutes.<br />
+            Then drafts the test scenarios you should be running and reruns the full suite every time you ship — no scripts, no setup.
           </p>
 
           {/* Segmentation chips */}
@@ -274,20 +274,18 @@ export default function LandingPage() {
       {/* ── Founder note ─────────────────────────────────────────────────── */}
       <section className="py-20 px-6 border-t border-white/5">
         <div className="max-w-2xl mx-auto text-center">
-          {/* TODO: replace initials div with <img src="/founder.jpg" ... /> */}
+          {/* TODO: replace icon with <img src="/founder.jpg" ... /> when ready */}
           <div className="w-16 h-16 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center mx-auto mb-6">
-            <span className="text-cyan-400 font-bold text-lg">AC</span>
+            <User className="h-7 w-7 text-cyan-400" />
           </div>
-          <p className="text-base text-gray-300 leading-relaxed mb-6 max-w-xl mx-auto">
-            "I built Steadra because I got tired of paying €3k/month for a QA hire who tested the same 5 flows every sprint — and still missed regressions. Beta users get direct access to me during onboarding. No support queue."
+          <p className="text-base text-gray-300 leading-relaxed mb-8 max-w-xl mx-auto">
+            "During beta, every report and every feature request reaches me directly. You get my calendar — not a support queue. Beta users shape what ships first."
           </p>
-          <p className="text-sm font-semibold text-white mb-1">Anghel Contiu</p>
-          <p className="text-xs text-gray-600 mb-6">Founder, Steadra</p>
           <a
             href={CALENDLY_URL}
             className="inline-flex items-center gap-2 text-sm text-cyan-400 hover:text-cyan-300 transition-colors"
           >
-            Book 15 minutes with me directly <ArrowRight className="h-4 w-4" />
+            Skip support — book 15 minutes with the founder <ArrowRight className="h-4 w-4" />
           </a>
         </div>
       </section>

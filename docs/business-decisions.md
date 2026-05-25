@@ -248,7 +248,7 @@ Model freedom is the primary upgrade incentive for BYOK: a Starter user who want
 
 ## BD-005 — Closed beta access model and tier constraints
 
-**Date:** 2026-05-21
+**Date:** 2026-05-21, amended 2026-05-25 (added "Pre-invite acquisition cost")
 **Status:** Closed — implemented
 
 ### Context
@@ -299,6 +299,63 @@ Beta modal CTA links to `mailto:anghel@steadra.dev` — human conversation, not 
 #### Tier visible in sidebar
 
 The sidebar shows a tier badge (color-coded: cyan for beta, blue for starter, purple for pro) and live counters: `7/10 runs · 2/3 scans` (turns red when at limit). Users know their limits before hitting them.
+
+#### Pre-invite acquisition cost (mini-scan)  *(added 2026-05-25)*
+
+When a visitor submits their email on the landing page (`POST /waitlist`) along with the URL of their site, an automatic mini-scan runs on that URL and a short report is emailed to them. This is the primary activation lever for the beta funnel — see `docs/sales-and-marketing.md` § "Beta user flow", step 2.
+
+This introduces a cost layer that the rest of BD-005 did not account for: cost is incurred **before** the user has accepted an invite and gained `tier=beta`. There is no `user_id` yet, and therefore no per-user quota to enforce.
+
+**Model choice — Opus analyst (interim).**
+
+The mini-scan reuses the same Opus-driven analyst path as the post-invite beta scan, with tight scope caps:
+
+- `pages=[root_url]` — exactly one page, no crawl
+- Bootstrap depth at default (5)
+- Wall-time cap: 60 seconds
+- Estimated cost per mini-scan: **~$0.15–0.20**
+
+Haiku as the analyst model was considered and explicitly rejected for now — quality on the analyst role is not validated (see BD-001 model matrix: Haiku is only validated as an *executor*). Switching to Haiku is the planned fallback if Opus volume cost exceeds budget. See triggers below.
+
+**Cost controls.**
+
+Three mechanisms bound the worst-case monthly cost from runaway waitlist signups:
+
+1. **Hard daily cap on mini-scans.** Global limit of 20 mini-scans/day. Beyond the cap, submissions are still accepted (email saved to waitlist) but no mini-scan runs; user gets a confirmation email saying their scan is queued for the next day. This caps Opus mini-scan cost at ~$120/month worst case.
+2. **Rate-limit per IP.** Max 3 waitlist submissions per IP per hour. Blocks rapid-fire bot signups before they touch the scan queue.
+3. **Bot / junk filtering at submit time** — explicitly *not* double opt-in email verification:
+   - Server-side email syntax + MX record check (free, instant)
+   - Block known disposable email domains (Mailinator, TempMail, Guerrilla Mail, etc.)
+   - Cloudflare Turnstile (invisible captcha) on the waitlist form
+
+**Why not double opt-in email verification.**
+
+A "confirm your email before we run the scan" step was considered and rejected. Empirical evidence across SaaS landing pages shows a 20–30% conversion drop when users must leave the site, find the confirmation email, and click a link before continuing the funnel. The filters above catch ~95% of junk submissions with effectively zero conversion impact.
+
+If junk volume becomes a problem despite these filters, the fallback is **not** double opt-in — it is switching to manual report review (per the Haiku migration trigger), which acts as a human filter at the send step.
+
+**Updated cost envelope (BD-005 cap raised from $200/mo to ~$340/mo worst case).**
+
+| Item | Volume assumption | Unit cost | Monthly |
+|------|---|-----------|---------|
+| Mini-scans on waitlist (Opus) — realistic | ~100 submits/mo | $0.20 | $20 |
+| Mini-scans on waitlist (Opus) — worst case at daily cap | ~600 submits/mo | $0.20 | $120 |
+| Beta tier usage (unchanged) | 10 users | $20 | $200 |
+| Resend / Postmark drip emails (flat) | — | — | $20 |
+| Cloudflare Turnstile, MX validation, disposable blocklist | — | $0 | $0 |
+| **Total realistic** | | | **~$240** |
+| **Total worst case (full daily cap)** | | | **~$340** |
+
+Realistic landing at ~$240/mo is 20% above the original BD-005 cap of $200/mo. The full worst case ($340/mo) would only occur with sustained 20 submits/day for a full month — at which point waitlist volume itself signals enough demand to justify the cost.
+
+**Triggers to revisit (for this section specifically).**
+
+| Question | Trigger |
+|----------|---------|
+| Migrate mini-scan analyst to Haiku | Monthly Opus mini-scan cost > $50 sustained for 2+ months |
+| Add manual report review before send | Quality issues reported by ≥2 beta users on the mini-scan output they received, OR Haiku migration triggered (review becomes the human filter for Haiku output quality) |
+| Lower daily cap below 20 | Junk/bot volume exceeds 50% of submissions despite filters |
+| Raise daily cap above 20 | All of: (a) signup demand exceeds cap consistently, (b) cost-per-paid-conversion stays favorable, (c) cumulative monthly mini-scan cost < $150 |
 
 ### Expected outcome
 

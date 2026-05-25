@@ -167,7 +167,10 @@ async def _spa_html_middleware(request: Request, call_next: Any) -> Any:
         path == p or path.startswith(p + "/") for p in _SPA_ROUTE_PREFIXES
     )
     if is_browser_nav and is_spa_route and _FRONTEND_DIR.exists():
-        return FileResponse(_FRONTEND_DIR / "index.html")
+        return FileResponse(
+            _FRONTEND_DIR / "index.html",
+            headers={"Cache-Control": "no-store"},
+        )
     return await call_next(request)
 _STATE_DB = Path("reports/.state/runs.db")
 

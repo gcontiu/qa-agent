@@ -62,4 +62,6 @@ def _row_to_dict(row: Any) -> dict:
         d["user_id"] = str(d["user_id"])
     if isinstance(d.get("created_at"), datetime):
         d["created_at"] = d["created_at"].isoformat()
+    # active defaults to True if the column hasn't been migrated yet
+    d.setdefault("active", True)
     return d

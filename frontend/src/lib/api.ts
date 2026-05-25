@@ -23,6 +23,7 @@ export class QuotaError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Accept': 'application/json',
     ...(init?.headers as Record<string, string>),
   }
   if (_token) headers['Authorization'] = `Bearer ${_token}`

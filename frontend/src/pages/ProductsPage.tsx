@@ -55,6 +55,36 @@ export default function ProductsPage() {
         </Button>
       </div>
 
+      <div className="mb-6 rounded-lg border border-border bg-muted/30 px-4 py-4 text-sm text-muted-foreground space-y-3">
+        <p className="font-medium text-foreground">What this does</p>
+        <p>
+          Point the agent at a URL. It crawls the site, understands what's there, writes a test suite
+          for it, and runs that suite against the live product — with no selectors, no step definitions,
+          and no test code to maintain.
+        </p>
+        <ul className="space-y-1.5 text-xs">
+          <li>
+            A <span className="font-medium text-foreground">Product</span> is a target site.{' '}
+            <span className="font-medium text-foreground">Scanning</span> it sends the LLM-driven
+            analyst to explore it and produce{' '}
+            <span className="font-medium text-foreground">Specs</span> — Gherkin feature files
+            containing <span className="font-medium text-foreground">Scenarios</span> (one
+            Given/When/Then test case each). Scans also surface{' '}
+            <span className="font-medium text-foreground">Issues</span>: console errors, broken
+            images, and failed network requests the agent observes while crawling.
+          </li>
+          <li>
+            A <span className="font-medium text-foreground">Run</span> executes your approved
+            scenarios against the live product. The executor LLM interprets each step, drives the
+            browser, and reports pass/fail with the reasoning behind every verdict.
+          </li>
+        </ul>
+        <p className="text-xs">
+          Because the LLM reads the page like a human (via the accessibility tree, not selectors),
+          the same spec keeps working when the UI is restyled or restructured.
+        </p>
+      </div>
+
       {isLoading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : products.length === 0 ? (

@@ -24,6 +24,8 @@ finish_analysis(summary="<what you found>", file_count=<N>)
 
 **You MUST call `finish_analysis` to signal completion.** Do not stop without it.
 
+The `summary` argument must always be written in **English**, regardless of the site's language.
+
 ## Scoped exploration (EXPLORE_ONLY)
 
 If the user message contains an `EXPLORE_ONLY` list, **do not follow navigation links to discover new pages**. Instead:

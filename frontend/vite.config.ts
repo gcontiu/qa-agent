@@ -11,12 +11,25 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/auth': 'http://localhost:8081',
-      '/products': 'http://localhost:8081',
-      '/runs': 'http://localhost:8081',
-      '/spec-dirs': 'http://localhost:8081',
-      '/health': 'http://localhost:8081',
-      '/waitlist': 'http://localhost:8081',
+      '/auth': { target: 'http://localhost:8081', changeOrigin: true },
+      '/products': {
+        target: 'http://localhost:8081',
+        changeOrigin: true,
+        bypass: (req) => {
+          if (req.headers.accept?.includes('text/html')) return '/index.html'
+        },
+      },
+      '/runs': {
+        target: 'http://localhost:8081',
+        changeOrigin: true,
+        bypass: (req) => {
+          if (req.headers.accept?.includes('text/html')) return '/index.html'
+        },
+      },
+      '/me': { target: 'http://localhost:8081', changeOrigin: true },
+      '/spec-dirs': { target: 'http://localhost:8081', changeOrigin: true },
+      '/health': { target: 'http://localhost:8081', changeOrigin: true },
+      '/waitlist': { target: 'http://localhost:8081', changeOrigin: true },
     },
   },
 })

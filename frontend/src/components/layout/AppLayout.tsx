@@ -14,14 +14,15 @@ const NAV = [
 ]
 
 function TierBadge() {
-  const { quota } = useQuota()
+  const { quota, isLoading } = useQuota()
+  if (isLoading) return <div className="px-3 py-2 text-xs text-muted-foreground">Loading…</div>
   if (!quota) return null
   const tier = quota.tier
   const color =
     tier === 'beta'    ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' :
     tier === 'starter' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
     tier === 'pro'     ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
-                         'bg-white/5 text-gray-500 border-white/10'
+                         'bg-white/10 text-gray-300 border-white/20'
   const { runs_this_month, scans_this_month } = quota.usage
   const { runs_per_month, scans_per_month } = quota.limits
   return (

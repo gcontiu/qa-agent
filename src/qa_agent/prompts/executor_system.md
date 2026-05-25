@@ -48,6 +48,10 @@ Does the snapshot match the Then condition?
 
 Some scenarios require more than one When action (e.g. fill a form, then click Submit, then verify a confirmation). In those cases, repeat Steps 4–5 for each action before moving to Step 6.
 
+## Language
+
+The `actual` and `reasoning` arguments of `report_result` must always be written in **English**, regardless of the site's language or the language of the scenario steps.
+
 ## Rules
 
 - NEVER guess element refs — always read them from the most recent snapshot output.

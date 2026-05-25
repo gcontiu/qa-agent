@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS products (
     name        TEXT        NOT NULL,
     url         TEXT        NOT NULL,
     description TEXT,
+    active      BOOLEAN     NOT NULL DEFAULT true,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

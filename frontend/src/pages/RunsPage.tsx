@@ -179,6 +179,12 @@ export default function RunsPage() {
         />
       )}
 
+      <div className="mb-6 rounded-lg border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1">
+        <p>A <span className="font-medium text-foreground">Run</span> executes your approved specs against the live product and reports a pass/fail verdict for each scenario.</p>
+        <p>Start a run by selecting a <span className="font-medium text-foreground">Product</span> (uses its approved specs) or a <span className="font-medium text-foreground">Spec directory</span> (uses files from the <code>specs/</code> folder on the server).</p>
+        <p>Only specs with status <span className="font-medium text-foreground">approved</span> are included. Approve specs from the product's detail page before running.</p>
+      </div>
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : runs.length === 0 ? (

@@ -31,16 +31,16 @@ interface Report {
 }
 
 function ScenarioBadge({ status }: { status: ScenarioResult['status'] }) {
-  if (status === 'pass') return <Badge className="gap-1 bg-green-600 text-xs"><CheckCircle2 className="h-3 w-3" />pass</Badge>
-  if (status === 'fail') return <Badge variant="destructive" className="gap-1 text-xs"><XCircle className="h-3 w-3" />fail</Badge>
-  return <Badge variant="outline" className="gap-1 text-xs text-amber-600 border-amber-400"><AlertTriangle className="h-3 w-3" />error</Badge>
+  if (status === 'pass') return <Badge className="gap-1 bg-green-500/20 text-green-400 border border-green-500/30 text-xs"><CheckCircle2 className="h-3 w-3" />pass</Badge>
+  if (status === 'fail') return <Badge className="gap-1 bg-red-500/20 text-red-400 border border-red-500/30 text-xs"><XCircle className="h-3 w-3" />fail</Badge>
+  return <Badge className="gap-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs"><AlertTriangle className="h-3 w-3" />error</Badge>
 }
 
 function StatCard({ label, value, color }: { label: string; value: number; color?: string }) {
   return (
-    <div className="border rounded-lg p-4 text-center">
-      <div className={`text-3xl font-semibold ${color ?? ''}`}>{value}</div>
-      <div className="text-xs text-muted-foreground mt-1">{label}</div>
+    <div className="border border-white/10 rounded-lg p-4 text-center bg-white/5">
+      <div className={`text-3xl font-semibold ${color ?? 'text-white'}`}>{value}</div>
+      <div className="text-xs text-gray-400 mt-1">{label}</div>
     </div>
   )
 }
@@ -77,8 +77,8 @@ export default function RunDetailPage() {
     onError: (e) => toast({ title: 'Cancel failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' }),
   })
 
-  if (runLoading) return <div className="p-8 text-sm text-muted-foreground">Loading…</div>
-  if (!run) return <div className="p-8 text-sm text-muted-foreground">Run not found.</div>
+  if (runLoading) return <div className="p-8 text-sm text-gray-400">Loading…</div>
+  if (!run) return <div className="p-8 text-sm text-gray-400">Run not found.</div>
 
   const summary = run.summary ?? report?.summary
   const isActive = run.status === 'running' || run.status === 'pending'
@@ -87,7 +87,7 @@ export default function RunDetailPage() {
     <div className="p-8 max-w-4xl">
       <button
         onClick={() => navigate('/runs')}
-        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6"
+        className="flex items-center gap-1 text-sm text-gray-400 hover:text-white mb-6"
       >
         <ArrowLeft className="h-4 w-4" /> Runs
       </button>
@@ -97,7 +97,7 @@ export default function RunDetailPage() {
         <div>
           <h1 className="text-xl font-semibold font-mono">{run.run_id}</h1>
           {run.spec_dir && (
-            <p className="text-sm text-muted-foreground mt-1">{run.spec_dir}</p>
+            <p className="text-sm text-gray-400 mt-1">{run.spec_dir}</p>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -106,6 +106,7 @@ export default function RunDetailPage() {
             <Button
               variant="outline"
               size="sm"
+              className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white"
               onClick={() => cancel.mutate()}
               disabled={cancel.isPending}
             >
@@ -117,7 +118,7 @@ export default function RunDetailPage() {
       </div>
 
       {/* Timestamps + cost */}
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mb-6">
+      <div className="flex flex-wrap gap-4 text-xs text-gray-400 mb-6">
         {run.started_at && <span>Started: {new Date(run.started_at).toLocaleString()}</span>}
         {run.completed_at && <span>Completed: {new Date(run.completed_at).toLocaleString()}</span>}
       </div>
@@ -133,7 +134,7 @@ export default function RunDetailPage() {
       {runId && (
         <div className="mb-6">
           {isActive && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+            <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
               <Loader2 className="h-4 w-4 animate-spin" />
               Running scenarios…
             </div>
@@ -147,9 +148,9 @@ export default function RunDetailPage() {
         <>
           <div className="grid grid-cols-4 gap-3 mb-6">
             <StatCard label="Total" value={summary.total} />
-            <StatCard label="Passed" value={summary.passed} color="text-green-600" />
-            <StatCard label="Failed" value={summary.failed} color="text-destructive" />
-            <StatCard label="Errored" value={summary.errored} color="text-amber-600" />
+            <StatCard label="Passed" value={summary.passed} color="text-green-400" />
+            <StatCard label="Failed" value={summary.failed} color="text-red-400" />
+            <StatCard label="Errored" value={summary.errored} color="text-amber-400" />
           </div>
           <Separator className="mb-6" />
         </>
@@ -160,34 +161,34 @@ export default function RunDetailPage() {
         <div>
           <h2 className="text-base font-medium mb-3">
             Scenarios
-            <span className="ml-2 text-sm font-normal text-muted-foreground">({report.results.length})</span>
+            <span className="ml-2 text-sm font-normal text-gray-400">({report.results.length})</span>
           </h2>
           <div className="space-y-2">
             {report.results.map((r) => (
-              <details key={r.requirement_id} className="border rounded-lg group">
-                <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none hover:bg-muted/50">
+              <details key={r.requirement_id} className="border border-white/10 rounded-lg group bg-white/[0.03]">
+                <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none hover:bg-white/5">
                   <ScenarioBadge status={r.status} />
-                  <span className="font-mono text-xs text-muted-foreground w-20 shrink-0">{r.requirement_id}</span>
+                  <span className="font-mono text-xs text-gray-400 w-20 shrink-0">{r.requirement_id}</span>
                   <span className="text-sm flex-1">{r.title}</span>
                   {r.duration_ms !== undefined && (
-                    <span className="text-xs text-muted-foreground shrink-0">{(r.duration_ms / 1000).toFixed(1)}s</span>
+                    <span className="text-xs text-gray-400 shrink-0">{(r.duration_ms / 1000).toFixed(1)}s</span>
                   )}
                   {r.priority && (
-                    <Badge variant="outline" className="text-xs shrink-0">{r.priority}</Badge>
+                    <Badge className="text-xs shrink-0 bg-white/5 text-gray-400 border border-white/10">{r.priority}</Badge>
                   )}
                 </summary>
                 {(r.reasoning || r.actual) && (
-                  <div className="px-4 pb-4 pt-1 space-y-2 border-t">
+                  <div className="px-4 pb-4 pt-1 space-y-2 border-t border-white/10">
                     {r.actual && (
                       <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">Actual</p>
+                        <p className="text-xs font-medium text-gray-400 mb-1">Actual</p>
                         <p className="text-sm">{r.actual}</p>
                       </div>
                     )}
                     {r.reasoning && (
                       <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">Reasoning</p>
-                        <p className="text-sm text-muted-foreground">{r.reasoning}</p>
+                        <p className="text-xs font-medium text-gray-400 mb-1">Reasoning</p>
+                        <p className="text-sm text-gray-400">{r.reasoning}</p>
                       </div>
                     )}
                   </div>

@@ -157,6 +157,8 @@ async def _www_redirect_middleware(request: Request, call_next: Any) -> Any:
 
 
 @app.middleware("http")
+_STATIC_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".woff", ".woff2", ".ttf"}
+
 async def _spa_html_middleware(request: Request, call_next: Any) -> Any:
     """Serve index.html for browser navigations to React Router paths.
 
@@ -176,6 +178,13 @@ async def _spa_html_middleware(request: Request, call_next: Any) -> Any:
             _FRONTEND_DIR / "index.html",
             headers={"Cache-Control": "no-store"},
         )
+    # Serve root-level static files (logo, favicon, etc.) from the frontend dist root.
+    if request.method == "GET" and _FRONTEND_DIR.is_dir():
+        suffix = Path(path).suffix.lower()
+        if suffix in _STATIC_EXTENSIONS:
+            candidate = _FRONTEND_DIR / path.lstrip("/")
+            if candidate.is_file():
+                return FileResponse(candidate)
     return await call_next(request)
 _STATE_DB = Path("reports/.state/runs.db")
 

@@ -35,7 +35,9 @@ from typing import Any, Literal
 
 import jwt as pyjwt
 from fastapi import Depends, FastAPI, HTTPException, Body, Request
-from fastapi.responses import FileResponse, JSONResponse
+import io
+import zipfile
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from slowapi import Limiter
@@ -697,6 +699,55 @@ async def list_runs(
     return sorted(runs, key=lambda r: r.run_id, reverse=True)
 
 
+@app.get("/runs/{run_id}/report/markdown")
+async def get_report_markdown(
+    run_id: str,
+    output: str = "reports",
+    user: CurrentUser = Depends(get_current_user),
+) -> Response:
+    """Return the report.md for a completed run as plain text."""
+    status_file = Path(output) / f"run-{run_id}" / "run_status.json"
+    if status_file.exists():
+        state = json.loads(status_file.read_text())
+        _assert_run_owner(state, user, run_id)
+
+    md_file = Path(output) / f"run-{run_id}" / "report.md"
+    if not md_file.exists():
+        raise HTTPException(status_code=404, detail=f"Report markdown for run '{run_id}' not found")
+    return Response(content=md_file.read_text(), media_type="text/plain")
+
+
+@app.get("/runs/{run_id}/export")
+async def export_run(
+    run_id: str,
+    output: str = "reports",
+    user: CurrentUser = Depends(get_current_user),
+) -> StreamingResponse:
+    """Download a ZIP archive of the full run artefacts (report.json, report.md, evidence/)."""
+    status_file = Path(output) / f"run-{run_id}" / "run_status.json"
+    if status_file.exists():
+        state = json.loads(status_file.read_text())
+        _assert_run_owner(state, user, run_id)
+
+    run_dir = Path(output) / f"run-{run_id}"
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+    buf = io.BytesIO()
+    skip = {"run_status.json"}
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(run_dir.rglob("*")):
+            if path.is_file() and path.name not in skip:
+                zf.write(path, path.relative_to(run_dir))
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="run-{run_id}.zip"'},
+    )
+
+
 @app.get("/runs/{run_id}/report")
 async def get_report(
     run_id: str,
@@ -956,6 +1007,34 @@ async def approve_spec(
     if not updated:
         raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found")
     return await db_specs.get_by_filename(product_id, filename)
+
+
+@app.get("/products/{product_id}/specs/export")
+async def export_specs(
+    product_id: str,
+    approved_only: bool = False,
+    user: CurrentUser = Depends(get_current_user),
+) -> StreamingResponse:
+    """Download a ZIP of all feature files (+ config.yaml) for a product."""
+    product = await _get_owned_product(product_id, user)
+    specs = await db_specs.list_by_product(product_id)
+    if approved_only:
+        specs = [s for s in specs if s.get("approved") or s.get("filename") == "config.yaml"]
+    if not specs:
+        raise HTTPException(status_code=404, detail="No specs found for this product")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for spec in specs:
+            zf.writestr(spec["filename"], spec["content"] or "")
+    buf.seek(0)
+
+    safe_name = re.sub(r"[^\w\-]", "_", product.get("name", product_id))
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="specs-{safe_name}.zip"'},
+    )
 
 
 # ---------------------------------------------------------------------------

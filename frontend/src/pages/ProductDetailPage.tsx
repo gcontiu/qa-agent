@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowLeft, Play, Loader2, CheckCircle2, XCircle, FileText, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Play, Loader2, CheckCircle2, XCircle, FileText, ExternalLink, Download } from 'lucide-react'
 import LogPanel from '@/components/LogPanel'
 import IssuesPanel from '@/components/IssuesPanel'
 
@@ -150,13 +150,22 @@ export default function ProductDetailPage() {
             {product.url} <ExternalLink className="h-3 w-3" />
           </a>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <Button onClick={openAnalyzeDialog} disabled={task?.status === 'running'} className="bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-60">
-            {task?.status === 'running'
-              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Scanning…</>
-              : <><Play className="h-4 w-4 mr-2" /> Scan</>
-            }
-          </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            {specs.length > 0 && (
+              <a href={`/products/${id}/specs/export`} download>
+                <Button variant="outline" size="sm" className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white gap-1.5">
+                  <Download className="h-3.5 w-3.5" /> Download specs
+                </Button>
+              </a>
+            )}
+            <Button onClick={openAnalyzeDialog} disabled={task?.status === 'running'} className="bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-60">
+              {task?.status === 'running'
+                ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Scanning…</>
+                : <><Play className="h-4 w-4 mr-2" /> Scan</>
+              }
+            </Button>
+          </div>
           {quota && (
             <span className={`text-xs ${quota.usage.scans_this_month >= quota.limits.scans_per_month ? 'text-red-400' : 'text-gray-400'}`}>
               {quota.usage.scans_this_month}/{quota.limits.scans_per_month} scans this month

@@ -86,7 +86,7 @@ function AppLayoutInner() {
   }
 
   return (
-    <div className="dark flex h-screen bg-background">
+    <div className="dark flex h-screen bg-background text-foreground">
       {/* Sidebar */}
       <aside className="w-56 flex flex-col border-r bg-sidebar">
         <div className="px-4 py-4 flex items-center">

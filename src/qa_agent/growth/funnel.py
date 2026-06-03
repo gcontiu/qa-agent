@@ -26,12 +26,16 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .api.admin import make_router as make_admin_router
+from .api.nps import make_router as make_nps_router
 from .api.waitlist import make_router as make_waitlist_router
+from .api.webhook import make_router as make_webhook_router
 from .config import FunnelConfig
 from .hooks import FunnelHooks
 from .providers.antiabuse import AntiAbuseGuard, NoopGuard
 from .providers.email import EmailProvider, ConsoleProvider
 from .providers.notify import NotificationProvider, ConsoleNotifyProvider
+from .workers.drip_worker import DripWorker
+from .workers.expiry_worker import ExpiryWorker
 from .workers.scan_worker import ScanWorker
 from . import db as growth_db
 
@@ -45,6 +49,7 @@ class BetaFunnel:
         notify: NotificationProvider | None = None,
         antiabuse: AntiAbuseGuard | None = None,
         admin_guard=None,
+        auth_guard=None,
         db=None,
     ) -> None:
         self._config = config or FunnelConfig()
@@ -53,6 +58,7 @@ class BetaFunnel:
         self._notify = notify or ConsoleNotifyProvider()
         self._antiabuse = antiabuse or NoopGuard()
         self._admin_guard = admin_guard or _noop_dep
+        self._auth_guard = auth_guard or _noop_dep
         self._db = db
 
         if db is not None:
@@ -65,6 +71,15 @@ class BetaFunnel:
             notify=self._notify,
         ) if self._hooks else None
 
+        self._drip_worker = DripWorker(
+            config=self._config,
+            hooks=self._hooks,
+            email=self._email,
+            notify=self._notify,
+        ) if self._hooks else None
+
+        self._expiry_worker = ExpiryWorker(hooks=self._hooks) if self._hooks else None
+
         # Build the combined router
         self.router = APIRouter()
         self.router.include_router(
@@ -75,21 +90,32 @@ class BetaFunnel:
                 notify=self._notify,
             )
         )
+        self.router.include_router(
+            make_nps_router(auth_guard=self._auth_guard)
+        )
         if self._hooks:
             self.router.include_router(
                 make_admin_router(
                     hooks=self._hooks,
                     admin_guard=self._admin_guard,
+                    email=self._email,
+                    config=self._config,
                 )
             )
+            self.router.include_router(make_webhook_router(hooks=self._hooks))
 
     async def start_workers(self) -> None:
         if self._scan_worker:
             self._scan_worker.start()
+        if self._drip_worker:
+            self._drip_worker.start()
+        if self._expiry_worker:
+            self._expiry_worker.start()
 
     async def stop_workers(self) -> None:
-        if self._scan_worker:
-            await self._scan_worker.stop()
+        for worker in (self._scan_worker, self._drip_worker, self._expiry_worker):
+            if worker:
+                await worker.stop()
 
 
 async def _noop_dep():

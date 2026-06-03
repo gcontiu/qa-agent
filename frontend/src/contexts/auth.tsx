@@ -7,7 +7,9 @@ interface AuthContextValue {
   session: Session | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string) => Promise<void>
+  sendMagicLink: (email: string) => Promise<void>
+  updatePassword: (password: string) => Promise<void>
+  signInWithGitHub: () => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -42,20 +44,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === 'INITIAL_SESSION' && s) {
           const expiresAt = (s.expires_at ?? 0) * 1000
           if (expiresAt < Date.now() + 10_000) {
-            // Token expired or about to — Supabase is refreshing it.
-            // Wait for TOKEN_REFRESHED or SIGNED_OUT before unblocking.
             return
           }
         }
 
-        // For all other events (SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT,
-        // or INITIAL_SESSION with a valid token) resolve immediately.
         resolve(s)
 
-        // Keep session in sync for subsequent events after initial resolve.
         if (resolved) {
           setSession(s)
           setToken(s?.access_token ?? null)
+        }
+
+        // On sign-in, seed the beta user's product (idempotent, best-effort).
+        if (event === 'SIGNED_IN' && s?.access_token) {
+          fetch('/me/activate', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${s.access_token}` },
+          }).catch(() => { /* non-blocking */ })
         }
       })
 
@@ -74,9 +79,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error
   }
 
-  async function signUp(email: string, password: string) {
+  async function sendMagicLink(email: string) {
     if (!client) throw new Error('Not initialised')
-    const { error } = await client.auth.signUp({ email, password })
+    const { error } = await client.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/products` },
+    })
+    if (error) throw error
+  }
+
+  async function updatePassword(password: string) {
+    if (!client) throw new Error('Not initialised')
+    const { error } = await client.auth.updateUser({ password })
+    if (error) throw error
+  }
+
+  async function signInWithGitHub() {
+    if (!client) throw new Error('Not initialised')
+    const { error } = await client.auth.signInWithOAuth({
+      provider: 'github',
+      options: { redirectTo: `${window.location.origin}/products` },
+    })
     if (error) throw error
   }
 
@@ -86,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ session, loading, signIn, sendMagicLink, updatePassword, signInWithGitHub, signOut }}>
       {children}
     </AuthContext.Provider>
   )

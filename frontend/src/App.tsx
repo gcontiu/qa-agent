@@ -11,6 +11,7 @@ import ProductDetailPage from '@/pages/ProductDetailPage'
 import SpecEditorPage from '@/pages/SpecEditorPage'
 import RunsPage from '@/pages/RunsPage'
 import RunDetailPage from '@/pages/RunDetailPage'
+import SetPasswordPage from '@/pages/SetPasswordPage'
 import { AdminGrowthRoutes } from '@/growth/routes'
 
 const queryClient = new QueryClient({
@@ -27,6 +28,14 @@ export default function App() {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/set-password"
+              element={
+                <ProtectedRoute>
+                  <SetPasswordPage />
+                </ProtectedRoute>
+              }
+            />
             <Route
               element={
                 <ProtectedRoute>

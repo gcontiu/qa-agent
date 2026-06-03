@@ -597,6 +597,53 @@ For qa-agent, `get_user_cost_summary` reads from the existing `jobs` table where
 
 Gated by `tier == 'admin'` from the host's auth system. The growth module doesn't decide who's an admin — it just receives the tier value via existing auth middleware. For qa-agent: reuse the current `RequireTier` wrapper.
 
+---
+
+### Beta user login flow
+
+**Invite-only beta — no public sign-up.** Account creation happens server-side when the admin sends an invite (`POST /admin/growth/waitlist/:id/send-invite`). Self-service sign-up is intentionally absent from the login page; new users enter through the waitlist on the landing page only.
+
+#### First login (invite acceptance)
+
+```
+Admin sends invite
+  └─ Supabase generate_link(type=magiclink, redirect_to=/set-password)
+       └─ Email with magic link → user clicks
+            └─ /set-password  (Supabase processes hash, signs user in)
+                 └─ User sets password
+                      └─ navigate(/products)
+                           └─ /me/activate fires (seeds product from scan_result, idempotent)
+```
+
+The magic link is single-use and expires in ~1 hour. Each new `send-invite` call invalidates the previous token.
+
+#### Returning login (after logout)
+
+```
+/login page:
+  ├─ Email + password  →  signIn()  →  /products
+  ├─ GitHub OAuth      →  signInWithGitHub()  →  /products
+  └─ "Forgot password? Get a login link"
+       └─ sendMagicLink(email, redirectTo=/products)
+            └─ OTP email → user clicks → /products
+```
+
+The "Get a login link" path (OTP via `signInWithOtp`) acts as forgot-password. It redirects to `/products` directly (no password re-set prompt), since the user already has an account.
+
+#### Non-invited users
+
+Users who never received an invite cannot create accounts. If an uninvited email is used on the login page:
+- Password sign-in: Supabase returns "Invalid credentials"
+- "Get a login link": Supabase sends an OTP — **but** the user has no account, so the link creates a new unverified Supabase user with no products and no `tier`. This is an accepted edge case; the `/products` page shows an empty state. A future gate (check `tier != 'free'` or `beta_enrollments` presence) can redirect to a waiting page.
+
+#### Frontend files
+
+| File | Role |
+|---|---|
+| `frontend/src/pages/LoginPage.tsx` | Sign-in form + GitHub OAuth + forgot-password magic link mode |
+| `frontend/src/pages/SetPasswordPage.tsx` | Password setup after first invite login; protected route at `/set-password` |
+| `frontend/src/contexts/auth.tsx` | Exposes `signIn`, `sendMagicLink`, `updatePassword`, `signInWithGitHub`, `signOut` |
+
 ### Reusability for extraction
 
 When extracting to project #2, copy two folders:

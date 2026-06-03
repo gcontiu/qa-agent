@@ -33,7 +33,30 @@ class ScanWorker:
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
-        self._task = asyncio.create_task(self._loop(), name="growth-scan-worker")
+        self._task = asyncio.create_task(self._startup_and_loop(), name="growth-scan-worker")
+
+    async def _startup_and_loop(self) -> None:
+        # Reset rows stuck in 'running' from a previous crashed process
+        await self._recover_stuck_scans()
+        await self._loop()
+
+    async def _recover_stuck_scans(self) -> None:
+        from ..db import get_pool
+        pool = get_pool()
+        if not pool:
+            return
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE growth.waitlist
+                SET scan_status = 'pending', scan_started_at = NULL
+                WHERE scan_status = 'running'
+                """
+            )
+        # result is e.g. "UPDATE 2"
+        n = int(result.split()[-1]) if result else 0
+        if n:
+            logger.warning("recovered %d stuck scan(s) from previous run", n)
 
     async def stop(self) -> None:
         if self._task:
@@ -112,12 +135,10 @@ class ScanWorker:
                 )
                 await self._email.send(email, subject, html)
                 await db_waitlist.mark_scan_email_sent(wid)
-                # Schedule next drip (invite at T+24h)
-                await db_drip.schedule(
-                    wid,
-                    "invite",
-                    self._config.drip_schedule["invite"],
-                )
+                # Schedule lifecycle drips
+                for tpl in ("invite", "reinforce", "beta_check_in", "cohort_report"):
+                    if tpl in self._config.drip_schedule:
+                        await db_drip.schedule(wid, tpl, self._config.drip_schedule[tpl])
             except Exception:
                 logger.exception("failed to send mini_scan_results email email=%s", email)
 

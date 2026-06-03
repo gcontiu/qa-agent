@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, Zap, ListChecks, Moon, Check, ChevronDown, ChevronUp, User } from 'lucide-react'
+import { useAuth } from '@/contexts/auth'
 
 const SPOTS_TOTAL = 50
 const SPOTS_CLAIMED = 27
@@ -50,6 +52,13 @@ const FAQS = [
 const CALENDLY_URL = '#waitlist'
 
 export default function LandingPage() {
+  const { session } = useAuth()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (session) navigate('/products', { replace: true })
+  }, [session, navigate])
+
   const [email, setEmail] = useState('')
   const [url, setUrl] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')

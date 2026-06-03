@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { growthApi } from '../api'
 import { CapMeter } from '../components/CapMeter'
 import { SignupFeed } from '../components/SignupFeed'
+import { FunnelChart } from '../components/FunnelChart'
 import { Link } from 'react-router-dom'
 
 function KPICard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -30,7 +31,9 @@ export default function Dashboard() {
         <h1 className="text-xl font-bold text-white">Growth</h1>
         <nav className="flex gap-3 text-sm">
           <Link to="/admin/growth/waitlist" className="text-slate-400 hover:text-white transition-colors">Waitlist</Link>
+          <Link to="/admin/growth/beta" className="text-slate-400 hover:text-white transition-colors">Active beta</Link>
           <Link to="/admin/growth/drip" className="text-slate-400 hover:text-white transition-colors">Drip queue</Link>
+          <Link to="/admin/growth/cost" className="text-slate-400 hover:text-white transition-colors">Cost</Link>
         </nav>
       </div>
 
@@ -41,7 +44,10 @@ export default function Dashboard() {
 
       <CapMeter used={data.today_scans} limit={20} />
 
-      <SignupFeed />
+      <div className="grid grid-cols-2 gap-4">
+        <FunnelChart />
+        <SignupFeed />
+      </div>
     </div>
   )
 }

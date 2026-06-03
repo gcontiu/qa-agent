@@ -28,16 +28,22 @@ class ConsoleProvider:
 
 
 class ResendProvider:
-    def __init__(self, api_key: str, from_email: str = "Steadra <noreply@steadra.dev>") -> None:
+    def __init__(self, api_key: str, from_email: str = "Steadra <noreply@updates.steadra.dev>") -> None:
         self._api_key = api_key
         self._from = from_email
 
     async def send(self, to: str, subject: str, html: str, text: str | None = None) -> None:
+        app_url = os.getenv("APP_URL", "https://steadra.dev")
+        unsubscribe_email = f"unsubscribe@updates.steadra.dev"
         payload: dict = {
             "from": self._from,
             "to": [to],
             "subject": subject,
             "html": html,
+            "headers": {
+                "List-Unsubscribe": f"<mailto:{unsubscribe_email}?subject=unsubscribe>, <{app_url}/unsubscribe>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
         }
         if text:
             payload["text"] = text

@@ -180,6 +180,43 @@ async def mark_scan_email_sent(id: str) -> None:
         )
 
 
+async def mark_invite_sent(id: str) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE growth.waitlist SET invite_status='sent', invite_sent_at=now() WHERE id=$1::uuid",
+            id,
+        )
+
+
+async def mark_invite_accepted(id: str, user_id: str) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE growth.waitlist
+               SET invite_status='accepted', invite_user_id=$2
+               WHERE id=$1::uuid""",
+            id, user_id,
+        )
+
+
+async def insert_beta_enrollment(user_id: str, waitlist_id: str, expires_days: int = 30) -> None:
+    from datetime import timedelta
+    pool = get_pool()
+    if not pool:
+        return
+    expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO growth.beta_enrollments (user_id, waitlist_id, expires_at)
+            VALUES ($1, $2::uuid, $3)
+            ON CONFLICT (user_id) DO NOTHING
+            """,
+            user_id, waitlist_id, expires_at,
+        )
+
+
 def _row_to_entry(row: dict) -> WaitlistEntry:
     scan_result = None
     if row.get("scan_result"):

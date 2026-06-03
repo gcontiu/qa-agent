@@ -27,6 +27,7 @@ export interface ScanResult {
   page_count: number
   duration_ms: number
   cost_usd: number
+  feature_files: Record<string, string>
 }
 
 export interface ScanIssue {
@@ -64,10 +65,30 @@ export interface WaitlistDetailResponse {
   } | null
 }
 
+export interface BetaEnrollment {
+  user_id: string
+  waitlist_id: string
+  email: string
+  url: string | null
+  segment: string | null
+  enrolled_at: string
+  expires_at: string
+  days_left: number | null
+  status: 'active' | 'expired' | 'converted'
+  converted_to_tier: string | null
+}
+
 export interface OverviewResponse {
   total_waitlist: number
   today_scans: number
   recent: WaitlistEntry[]
+}
+
+export interface FunnelStage { label: string; value: number }
+export interface CostPoint { day: string; cost_usd: number; scans: number }
+export interface CostProjection {
+  month_spend: number; daily_avg: number; eom_forecast: number
+  days_elapsed: number; days_remaining: number
 }
 
 export const growthApi = {
@@ -98,8 +119,26 @@ export const growthApi = {
   skipNextDrip: (id: string) =>
     api.post(`/admin/growth/waitlist/${id}/skip-next-drip`),
 
+  sendInvite: (id: string) =>
+    api.post<{ status: string; email: string }>(`/admin/growth/waitlist/${id}/send-invite`),
+
+  seedAccount: (id: string) =>
+    api.post<{ status: string; user_id: string }>(`/admin/growth/waitlist/${id}/seed-account`),
+
   getDripQueue: (status?: string) => {
     const qs = status ? `?status=${status}` : ''
     return api.get<{ items: DripJob[] }>(`/admin/growth/drip${qs}`)
   },
+
+  getBetaEnrollments: () =>
+    api.get<{ items: BetaEnrollment[] }>('/admin/growth/beta'),
+
+  getFunnelStats: () =>
+    api.get<{ stages: FunnelStage[] }>('/admin/growth/funnel'),
+
+  getCostSeries: () =>
+    api.get<{ series: CostPoint[]; projection: CostProjection | null }>('/admin/growth/cost-series'),
+
+  submitNps: (score: number, contextId?: string, comment?: string) =>
+    api.post<{ status: string; id: string }>('/nps', { score, context_id: contextId, comment }),
 }

@@ -21,6 +21,7 @@ class MiniScanResult(BaseModel):
     duration_ms: int
     cost_usd: float = 0.0
     full_report_url: str | None = None
+    feature_files: dict[str, str] = {}  # filename → gherkin content
 
 
 class WaitlistEntry(BaseModel):

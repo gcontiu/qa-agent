@@ -14,34 +14,57 @@ logger = logging.getLogger(__name__)
 
 class QAAgentHooks:
     async def run_mini_scan(self, email: str, url: str) -> MiniScanResult:
-        """Run Opus analyst pass on the URL. 60s wall-time cap applied by the worker."""
+        """Crawl url with the analyst, return issues + cost. 60s cap applied by worker."""
+        import tempfile
+        import time
+        from pathlib import Path
+
         from qa_agent.analyst import run_analysis
-        try:
+        from qa_agent.issues import BufferingIssueSink
+        from qa_agent.llm import LLMConfig
+
+        issues_sink = BufferingIssueSink()
+        config = LLMConfig.from_env(role="analyst")
+        # Use Haiku for cost efficiency on mini-scans
+        config.model = "claude-haiku-4-5-20251001"
+
+        start = time.monotonic()
+        feature_files: dict[str, str] = {}
+        with tempfile.TemporaryDirectory() as tmpdir:
             result = await run_analysis(
+                url=url,
+                description=f"Quick QA scan for {url}",
+                output_dir=Path(tmpdir),
+                config=config,
                 pages=[url],
-                model="claude-opus-4-7",
+                issues_sink=issues_sink,
             )
-            issues = []
-            for finding in result.findings:
-                sev = "critical" if finding.severity in ("high", "critical") else (
-                    "warning" if finding.severity == "medium" else "info"
-                )
-                issues.append(ScanIssue(
-                    severity=sev,
-                    type=finding.type,
-                    message=finding.message,
-                    location=getattr(finding, "url", None),
-                ))
-            cost = float(getattr(result, "cost_usd", 0) or 0)
-            return MiniScanResult(
-                issues=issues,
-                page_count=getattr(result, "pages_crawled", 1),
-                duration_ms=getattr(result, "duration_ms", 0),
-                cost_usd=cost,
+            # Capture generated Gherkin before tempdir is deleted
+            for p in Path(tmpdir).iterdir():
+                if p.suffix in (".feature", ".yaml", ".yml") and p.is_file():
+                    feature_files[p.name] = p.read_text(encoding="utf-8")
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+        raw_issues = issues_sink.finalize()
+
+        _SEV = {"critical": "critical", "high": "critical", "medium": "warning", "low": "info", "info": "info"}
+        issues = [
+            ScanIssue(
+                severity=_SEV.get(str(i.severity).lower(), "info"),
+                type=str(i.type),
+                message=i.message,
+                location=i.url or None,
             )
-        except Exception as exc:
-            logger.exception("mini-scan failed for %s", url)
-            raise
+            for i in raw_issues
+        ]
+
+        return MiniScanResult(
+            issues=issues,
+            page_count=1,
+            duration_ms=duration_ms,
+            cost_usd=float(result.get("cost_usd") or 0),
+            feature_files=feature_files,
+        )
 
     async def seed_user_account(self, user_id: str, waitlist_row: WaitlistEntry) -> None:
         from qa_agent.db import products as db_products

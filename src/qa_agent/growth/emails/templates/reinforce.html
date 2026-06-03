@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Still thinking about {{ domain }}?</title>
+<style>
+  body { margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f0f;color:#e5e5e5; }
+  .wrap { max-width:560px;margin:40px auto;padding:32px;background:#1a1a1a;border-radius:12px;border:1px solid #2a2a2a; }
+  h1 { font-size:20px;color:#fff;margin:0 0 8px; }
+  p { font-size:15px;color:#aaa;line-height:1.6;margin:0 0 16px; }
+  .url { font-family:monospace;font-size:13px;color:#7c7cff;background:#1e1e33;padding:4px 10px;border-radius:6px;display:inline-block;margin-bottom:20px; }
+  .stat-row { display:flex;gap:16px;margin:20px 0; }
+  .stat { flex:1;text-align:center;background:#222;border-radius:8px;padding:16px 8px; }
+  .stat .n { font-size:26px;font-weight:700;color:#fff; }
+  .stat .l { font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em; }
+  .issue-row { padding:10px 14px;border-left:3px solid #555;background:#222;border-radius:6px;margin-bottom:8px; }
+  .issue-row.critical { border-color:#ef4444; }
+  .issue-row.warning { border-color:#f59e0b; }
+  .sev { font-size:10px;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:3px; }
+  .sev.critical { color:#ef4444; }
+  .sev.warning { color:#f59e0b; }
+  .msg { font-size:13px;color:#ccc; }
+  .cta { display:block;margin:24px 0 0;padding:14px 24px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;text-align:center;font-weight:600;font-size:15px; }
+  .footer { margin-top:28px;padding-top:20px;border-top:1px solid #2a2a2a;font-size:12px;color:#555; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p style="font-size:13px;color:#555;margin:0 0 20px;">Steadra</p>
+  <h1>Still thinking about {{ domain }}?</h1>
+  <p>Three days ago we scanned your site and found some issues worth fixing. Here's a quick reminder of what we found.</p>
+  {% if url %}<div class="url">{{ url }}</div>{% endif %}
+
+  {% if n_issues > 0 %}
+  <div class="stat-row">
+    <div class="stat">
+      <div class="n">{{ n_issues }}</div>
+      <div class="l">Issues found</div>
+    </div>
+    {% if n_critical > 0 %}
+    <div class="stat">
+      <div class="n" style="color:#ef4444">{{ n_critical }}</div>
+      <div class="l">Critical</div>
+    </div>
+    {% endif %}
+    {% if n_warning > 0 %}
+    <div class="stat">
+      <div class="n" style="color:#f59e0b">{{ n_warning }}</div>
+      <div class="l">Warnings</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% for issue in top_issues %}
+  <div class="issue-row {{ issue.severity }}">
+    <div class="sev {{ issue.severity }}">{{ issue.severity }}</div>
+    <div class="msg">{{ issue.message }}</div>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  <p style="margin-top:20px;">When you're ready to fix these, Steadra runs the full test suite automatically — no setup needed.</p>
+  <a href="{{ app_url }}" class="cta">View full report →</a>
+  <div class="footer">You're on the Steadra waitlist. <a href="{{ unsubscribe_url }}" style="color:#555;">Unsubscribe</a></div>
+</div>
+</body>
+</html>

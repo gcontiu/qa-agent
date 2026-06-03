@@ -228,6 +228,7 @@ _funnel = BetaFunnel(
     notify=_notify_from_env(),
     antiabuse=_antiabuse_from_env(),
     admin_guard=_require_admin,
+    auth_guard=get_current_user,
 )
 app.include_router(_funnel.router)
 
@@ -479,6 +480,22 @@ def _assert_run_owner(state: dict, user: CurrentUser, run_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@app.post("/me/activate")
+async def activate_account(user: CurrentUser = Depends(get_current_user)) -> dict:
+    """Called by the frontend on SIGNED_IN to seed the beta user's product."""
+    from qa_agent.growth.db import waitlist as db_waitlist
+    row = await db_waitlist.get_by_email(user.email)
+    if not row:
+        return {"status": "no_waitlist_entry"}
+    entry = db_waitlist._row_to_entry(row)
+    if entry.scan_result:
+        try:
+            await _funnel._hooks.seed_user_account(user.user_id, entry)
+        except Exception as exc:
+            print(f"ACTIVATE seed_user_account failed user={user.user_id}: {exc}", flush=True)
+    return {"status": "ok"}
+
 
 @app.get("/me/quota")
 async def get_my_quota(user: CurrentUser = Depends(get_current_user)) -> dict:

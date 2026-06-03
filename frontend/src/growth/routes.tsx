@@ -10,6 +10,8 @@ import Dashboard from './pages/Dashboard'
 import WaitlistList from './pages/WaitlistList'
 import WaitlistDetail from './pages/WaitlistDetail'
 import DripQueue from './pages/DripQueue'
+import ActiveBeta from './pages/ActiveBeta'
+import CostProjection from './pages/CostProjection'
 
 export function AdminGrowthRoutes() {
   return (
@@ -18,6 +20,8 @@ export function AdminGrowthRoutes() {
       <Route path="waitlist" element={<WaitlistList />} />
       <Route path="waitlist/:id" element={<WaitlistDetail />} />
       <Route path="drip" element={<DripQueue />} />
+      <Route path="beta" element={<ActiveBeta />} />
+      <Route path="cost" element={<CostProjection />} />
       <Route path="*" element={<Navigate to="" replace />} />
     </Routes>
   )

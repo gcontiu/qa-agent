@@ -46,7 +46,11 @@ export function Timeline({ data }: Props) {
         <TimelineEvent
           status={e.scan_status === 'running' ? 'running' : e.scan_status === 'failed' ? 'failed' : 'done'}
           timestamp={e.scan_started_at}
-          title={e.scan_status === 'capped' ? 'Mini-scan capped (daily limit)' : 'Mini-scan started'}
+          title={
+            e.scan_status === 'capped' ? 'Mini-scan capped (daily limit)' :
+            e.scan_status === 'failed' ? 'Mini-scan failed' :
+            'Mini-scan started'
+          }
         />
       )}
 
@@ -102,24 +106,58 @@ export function Timeline({ data }: Props) {
       )}
 
       {/* Issues preview */}
-      {e.scan_result && e.scan_result.issues.length > 0 && (
+      {e.scan_result && (
         <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-slate-800">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
             Scan issues ({e.scan_result.issues.length})
           </p>
-          <div className="space-y-2">
-            {e.scan_result.issues.slice(0, 5).map((issue, i) => (
-              <div key={i} className={`text-xs p-2 rounded border ${severityColor(issue.severity)}`}>
-                <span className="font-semibold uppercase mr-2">{issue.severity}</span>
-                {issue.message}
-                {issue.location && (
-                  <div className="mt-0.5 text-slate-600 font-mono truncate">{issue.location}</div>
-                )}
-              </div>
+          {e.scan_result.issues.length === 0 ? (
+            <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              No issues found — the site looks clean.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {e.scan_result.issues.slice(0, 5).map((issue, i) => (
+                <div key={i} className={`text-xs p-2 rounded border ${severityColor(issue.severity)}`}>
+                  <span className="font-semibold uppercase mr-2">{issue.severity}</span>
+                  {issue.message}
+                  {issue.location && (
+                    <div className="mt-0.5 text-slate-600 font-mono truncate">{issue.location}</div>
+                  )}
+                </div>
+              ))}
+              {e.scan_result.issues.length > 5 && (
+                <p className="text-xs text-slate-600">+ {e.scan_result.issues.length - 5} more</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Feature files */}
+      {e.scan_result && Object.keys(e.scan_result.feature_files ?? {}).length > 0 && (
+        <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-slate-800">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+            Gherkin scenarios ({Object.keys(e.scan_result.feature_files).length} files)
+          </p>
+          <div className="space-y-3">
+            {Object.entries(e.scan_result.feature_files).map(([filename, content]) => (
+              <details key={filename} className="group">
+                <summary className="flex items-center gap-2 cursor-pointer list-none">
+                  <svg className="w-3 h-3 text-slate-500 transition-transform group-open:rotate-90" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/>
+                  </svg>
+                  <span className="text-xs font-mono text-indigo-400 hover:text-indigo-300">{filename}</span>
+                  <span className="text-xs text-slate-600">{content.split('\n').filter(l => l.trim().startsWith('Scenario')).length} scenarios</span>
+                </summary>
+                <pre className="mt-2 p-3 bg-slate-950 rounded-lg text-xs text-slate-300 font-mono overflow-x-auto whitespace-pre leading-relaxed border border-slate-800">
+                  {content}
+                </pre>
+              </details>
             ))}
-            {e.scan_result.issues.length > 5 && (
-              <p className="text-xs text-slate-600">+ {e.scan_result.issues.length - 5} more</p>
-            )}
           </div>
         </div>
       )}

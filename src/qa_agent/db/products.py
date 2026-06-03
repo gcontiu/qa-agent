@@ -55,6 +55,41 @@ async def list_all(user_id: str | None = None) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+async def get_by_user_and_url(user_id: str, url: str) -> dict | None:
+    pool = get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM products WHERE user_id = $1::uuid AND url = $2",
+            user_id, url,
+        )
+    return _row_to_dict(row) if row else None
+
+
+async def seed_specs_from_scan(product_id: str, scan_result: Any) -> int:
+    """Insert feature files from a mini-scan into the specs table. Returns count inserted."""
+    feature_files = getattr(scan_result, "feature_files", {}) or {}
+    if not feature_files:
+        return 0
+    pool = get_pool()
+    if not pool:
+        return 0
+    count = 0
+    async with pool.acquire() as conn:
+        for filename, content in feature_files.items():
+            await conn.execute(
+                """
+                INSERT INTO specs (product_id, filename, content)
+                VALUES ($1::uuid, $2, $3)
+                ON CONFLICT (product_id, filename) DO UPDATE SET content = EXCLUDED.content
+                """,
+                product_id, filename, content,
+            )
+            count += 1
+    return count
+
+
 def _row_to_dict(row: Any) -> dict:
     d = dict(row)
     d["id"] = str(d["id"])

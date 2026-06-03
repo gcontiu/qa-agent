@@ -192,28 +192,28 @@ export default function RunsPage() {
       )}
 
       <Dialog open={newRunOpen} onOpenChange={setNewRunOpen}>
-        <DialogContent>
+        <DialogContent className="bg-[#0d1024] border border-white/10 text-white">
           <DialogHeader>
-            <DialogTitle>New run</DialogTitle>
+            <DialogTitle className="text-white">New run</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit(d => create.mutate(d))}>
             <div className="space-y-4 py-2">
 
-              <div className="space-y-1">
-                <Label>Product</Label>
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">Product</Label>
                 <Controller
                   name="product_id"
                   control={control}
                   render={({ field }) => (
                     <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value}>
-                      <SelectTrigger>
+                      <SelectTrigger className="bg-white/5 border-white/10 text-white focus:border-cyan-500/50">
                         <SelectValue placeholder={products.length === 0 ? 'No products found' : 'Select a product…'} />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="bg-[#0d1024] border-white/10">
                         {products.map(p => (
-                          <SelectItem key={p.id} value={p.id}>
+                          <SelectItem key={p.id} value={p.id} className="text-white focus:bg-white/10 focus:text-white">
                             <span>{p.name}</span>
-                            <span className="ml-2 text-muted-foreground text-xs">{p.url}</span>
+                            <span className="ml-2 text-gray-500 text-xs">{p.url}</span>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -221,28 +221,30 @@ export default function RunsPage() {
                   )}
                 />
                 {errors.product_id && (
-                  <p className="text-xs text-destructive">{errors.product_id.message}</p>
+                  <p className="text-xs text-red-400">{errors.product_id.message}</p>
                 )}
               </div>
 
-              <div className="space-y-1">
-                <Label>Executor model <span className="text-muted-foreground">(optional)</span></Label>
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">
+                  Executor model <span className="text-gray-500 font-normal">(optional)</span>
+                </Label>
                 <Controller
                   name="executor_model"
                   control={control}
                   render={({ field }) => (
                     <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value}>
-                      <SelectTrigger>
+                      <SelectTrigger className="bg-white/5 border-white/10 text-white focus:border-cyan-500/50">
                         <SelectValue placeholder="Default (Haiku — fastest, cheapest)" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="bg-[#0d1024] border-white/10">
                         {MODEL_OPTIONS.map(({ value, label }) => {
                           const allowed = modelsAllowed.includes(value)
                           return (
-                            <SelectItem key={value} value={value} disabled={!allowed}>
-                              <span className={allowed ? '' : 'text-muted-foreground'}>{label}</span>
+                            <SelectItem key={value} value={value} disabled={!allowed} className="text-white focus:bg-white/10 focus:text-white">
+                              <span className={allowed ? '' : 'text-gray-500'}>{label}</span>
                               {!allowed && (
-                                <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-muted text-muted-foreground">
+                                <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-white/5 text-gray-500">
                                   Not on your plan
                                 </span>
                               )}
@@ -255,19 +257,33 @@ export default function RunsPage() {
                 />
               </div>
 
-              <div className="space-y-1">
-                <Label>Max scenarios <span className="text-muted-foreground">(optional)</span></Label>
-                <Input {...register('max_scenarios')} type="number" min={1} className="w-28" />
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">
+                  Max scenarios <span className="text-gray-500 font-normal">(optional)</span>
+                </Label>
+                <Input
+                  {...register('max_scenarios')}
+                  type="number"
+                  min={1}
+                  className="w-28 bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50"
+                />
               </div>
             </div>
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setNewRunOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={create.isPending}>
+            <DialogFooter className="mt-6">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setNewRunOpen(false)}
+                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white"
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={create.isPending} className="bg-cyan-500 hover:bg-cyan-400 text-black">
                 {create.isPending ? 'Starting…' : 'Start run'}
               </Button>
             </DialogFooter>
             {create.isError && (
-              <p className="text-xs text-destructive mt-2">
+              <p className="text-xs text-red-400 mt-2">
                 {create.error instanceof Error ? create.error.message : 'Error'}
               </p>
             )}

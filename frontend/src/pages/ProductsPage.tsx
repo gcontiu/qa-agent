@@ -8,6 +8,7 @@ import { api } from '@/lib/api'
 import type { Product } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -141,37 +142,57 @@ export default function ProductsPage() {
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="bg-[#0d1024] border border-white/10 text-white">
           <DialogHeader>
-            <DialogTitle>New product</DialogTitle>
+            <DialogTitle className="text-white">New product</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit(d => create.mutate(d))}>
             <div className="space-y-4 py-2">
-              <div className="space-y-1">
-                <Label>Name</Label>
-                <Input {...register('name')} placeholder="My App" />
-                {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">Name</Label>
+                <Input
+                  {...register('name')}
+                  placeholder="My App"
+                  className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50"
+                />
+                {errors.name && <p className="text-xs text-red-400">{errors.name.message}</p>}
               </div>
-              <div className="space-y-1">
-                <Label>URL</Label>
-                <Input {...register('url')} placeholder="https://myapp.example.com" />
-                {errors.url && <p className="text-xs text-destructive">{errors.url.message}</p>}
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">URL</Label>
+                <Input
+                  {...register('url')}
+                  placeholder="https://myapp.example.com"
+                  className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50"
+                />
+                {errors.url && <p className="text-xs text-red-400">{errors.url.message}</p>}
               </div>
-              <div className="space-y-1">
-                <Label>Description <span className="text-muted-foreground">(optional)</span></Label>
-                <Input {...register('description')} placeholder="Short description for the analyst" />
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">
+                  Description <span className="text-gray-500 font-normal">(optional)</span>
+                </Label>
+                <Textarea
+                  {...register('description')}
+                  placeholder="Short description for the analyst"
+                  rows={3}
+                  className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50 resize-none"
+                />
               </div>
             </div>
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => { setOpen(false); reset() }}>
+            <DialogFooter className="mt-6">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setOpen(false); reset() }}
+                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white"
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={create.isPending}>
+              <Button type="submit" disabled={create.isPending} className="bg-cyan-500 hover:bg-cyan-400 text-black">
                 {create.isPending ? 'Creating…' : 'Create'}
               </Button>
             </DialogFooter>
             {create.isError && (
-              <p className="text-xs text-destructive mt-2">
+              <p className="text-xs text-red-400 mt-2">
                 {create.error instanceof Error ? create.error.message : 'Error'}
               </p>
             )}

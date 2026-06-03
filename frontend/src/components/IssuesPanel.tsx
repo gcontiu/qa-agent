@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button'
 import { AlertTriangle, AlertCircle, Info, ExternalLink, CheckCircle2, ShieldCheck } from 'lucide-react'
 
 const SEVERITY_CONFIG = {
-  high:   { icon: AlertCircle,  color: 'text-destructive',    border: 'border-destructive/40',  bg: 'bg-destructive/5'  },
-  medium: { icon: AlertTriangle, color: 'text-amber-600',      border: 'border-amber-400/40',    bg: 'bg-amber-50/50'    },
-  low:    { icon: Info,         color: 'text-muted-foreground', border: 'border-border',          bg: ''                  },
+  high:   { icon: AlertCircle,   color: 'text-red-400',    border: 'border-red-500/30',   bg: 'bg-red-500/10'   },
+  medium: { icon: AlertTriangle, color: 'text-amber-400',  border: 'border-amber-500/30', bg: 'bg-amber-500/10' },
+  low:    { icon: Info,          color: 'text-gray-400',   border: 'border-white/10',     bg: 'bg-white/5'      },
 } as const
 
 const TYPE_LABEL: Record<Issue['type'], string> = {
@@ -23,11 +23,17 @@ const TYPE_LABEL: Record<Issue['type'], string> = {
 }
 
 const STATUS_OPTIONS: Array<{ value: Issue['status']; label: string }> = [
-  { value: 'acknowledged', label: 'Acknowledge' },
-  { value: 'wont_fix',     label: "Won't fix"   },
+  { value: 'acknowledged', label: 'Acknowledge'   },
+  { value: 'wont_fix',     label: "Won't fix"     },
   { value: 'resolved',     label: 'Mark resolved' },
-  { value: 'open',         label: 'Reopen'       },
+  { value: 'open',         label: 'Reopen'        },
 ]
+
+const STATUS_BADGE: Record<string, string> = {
+  acknowledged: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+  wont_fix:     'bg-white/5 text-gray-500 border border-white/10',
+  resolved:     'bg-green-500/20 text-green-400 border border-green-500/30',
+}
 
 function SeverityBadge({ severity }: { severity: Issue['severity'] }) {
   const cfg = SEVERITY_CONFIG[severity]
@@ -57,18 +63,18 @@ function IssueRow({ issue, productId }: { issue: Issue; productId: string }) {
 
   return (
     <details className={`border rounded-lg group ${cfg.border}`}>
-      <summary className={`flex items-start gap-3 px-4 py-3 cursor-pointer list-none hover:${cfg.bg || 'bg-muted/30'} rounded-lg`}>
+      <summary className={`flex items-start gap-3 px-4 py-3 cursor-pointer list-none hover:${cfg.bg} rounded-lg`}>
         <div className="mt-0.5 shrink-0">
           <SeverityBadge severity={issue.severity} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className="text-xs shrink-0">
+            <Badge className="text-xs shrink-0 bg-white/5 text-gray-400 border border-white/10">
               {TYPE_LABEL[issue.type]}
             </Badge>
-            <span className="text-sm truncate">{issue.message}</span>
+            <span className="text-sm text-white truncate">{issue.message}</span>
           </div>
-          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
             <span className="truncate max-w-xs">{issue.url}</span>
             {issue.occurrences > 1 && (
               <span className="shrink-0">× {issue.occurrences}</span>
@@ -76,32 +82,33 @@ function IssueRow({ issue, productId }: { issue: Issue; productId: string }) {
           </div>
         </div>
         {issue.status !== 'open' && (
-          <Badge variant="secondary" className="text-xs shrink-0">{issue.status}</Badge>
+          <Badge className={`text-xs shrink-0 ${STATUS_BADGE[issue.status] ?? 'bg-white/5 text-gray-400 border border-white/10'}`}>
+            {issue.status}
+          </Badge>
         )}
       </summary>
 
-      <div className="px-4 pb-4 pt-2 border-t space-y-3">
-        {/* Details */}
+      <div className="px-4 pb-4 pt-2 border-t border-white/10 space-y-3">
         {issue.details && Object.keys(issue.details).length > 0 && (() => {
           const d = issue.details as Record<string, string>
           return (
-            <div className="space-y-1">
+            <div className="space-y-2">
               {d['expected'] && (
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground">Expected</p>
-                  <p className="text-sm">{d['expected']}</p>
+                  <p className="text-xs font-medium text-gray-400 mb-0.5">Expected</p>
+                  <p className="text-sm text-white">{d['expected']}</p>
                 </div>
               )}
               {d['actual'] && (
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground">Actual</p>
-                  <p className="text-sm">{d['actual']}</p>
+                  <p className="text-xs font-medium text-gray-400 mb-0.5">Actual</p>
+                  <p className="text-sm text-white">{d['actual']}</p>
                 </div>
               )}
               {d['raw'] && (
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground">Raw</p>
-                  <pre className="text-xs text-muted-foreground bg-muted rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">
+                  <p className="text-xs font-medium text-gray-400 mb-0.5">Raw</p>
+                  <pre className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">
                     {d['raw']}
                   </pre>
                 </div>
@@ -110,32 +117,29 @@ function IssueRow({ issue, productId }: { issue: Issue; productId: string }) {
           )
         })()}
 
-        {/* URL link */}
         <div className="flex items-center gap-2">
           <a
             href={issue.url}
             target="_blank"
             rel="noreferrer"
-            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            className="text-xs text-gray-400 hover:text-white flex items-center gap-1 transition-colors"
           >
             {issue.url} <ExternalLink className="h-3 w-3" />
           </a>
         </div>
 
-        {/* Meta */}
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-gray-500">
           First seen: {new Date(issue.first_seen_at).toLocaleString()}
           {issue.occurrences > 1 && ` · Last seen: ${new Date(issue.last_seen_at).toLocaleString()}`}
         </div>
 
-        {/* Status actions */}
         <div className="flex flex-wrap gap-2">
           {actions.map(action => (
             <Button
               key={action.value}
               variant="outline"
               size="sm"
-              className="h-7 text-xs"
+              className="h-7 text-xs bg-white/10 border-white/25 text-white hover:bg-white/20"
               disabled={updateStatus.isPending}
               onClick={() => updateStatus.mutate(action.value)}
             >
@@ -167,12 +171,11 @@ export default function IssuesPanel({ productId, hasScanned }: { productId: stri
 
   if (isLoading) return null
 
-  // No analysis run yet
   if (!hasScanned) {
     return (
       <div>
         <h2 className="text-base font-medium mb-3">Issues</h2>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+        <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
           <ShieldCheck className="h-4 w-4 shrink-0" />
           Run an analysis to automatically detect JS errors, broken links, and server errors.
         </div>
@@ -180,12 +183,11 @@ export default function IssuesPanel({ productId, hasScanned }: { productId: stri
     )
   }
 
-  // Analysis ran but no issues found
   if (!summary || summary.total === 0) {
     return (
       <div>
         <h2 className="text-base font-medium mb-3">Issues</h2>
-        <div className="flex items-center gap-2 text-sm text-green-600 py-4">
+        <div className="flex items-center gap-2 text-sm text-green-400 py-4">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           No issues detected on last scan.
         </div>
@@ -198,23 +200,23 @@ export default function IssuesPanel({ productId, hasScanned }: { productId: stri
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-base font-medium">
           Issues
-          <span className="ml-2 text-sm font-normal text-muted-foreground">
+          <span className="ml-2 text-sm font-normal text-gray-400">
             ({summary.total} found)
           </span>
         </h2>
         <div className="flex items-center gap-3 text-sm">
           {summary.high > 0 && (
-            <span className="flex items-center gap-1 text-destructive font-medium">
+            <span className="flex items-center gap-1 text-red-400 font-medium">
               <AlertCircle className="h-4 w-4" /> {summary.high} high
             </span>
           )}
           {summary.medium > 0 && (
-            <span className="flex items-center gap-1 text-amber-600 font-medium">
+            <span className="flex items-center gap-1 text-amber-400 font-medium">
               <AlertTriangle className="h-4 w-4" /> {summary.medium} medium
             </span>
           )}
           {summary.low > 0 && (
-            <span className="flex items-center gap-1 text-muted-foreground">
+            <span className="flex items-center gap-1 text-gray-400">
               <Info className="h-4 w-4" /> {summary.low} low
             </span>
           )}
@@ -229,8 +231,8 @@ export default function IssuesPanel({ productId, hasScanned }: { productId: stri
             onClick={() => setStatusFilter(f)}
             className={`text-xs px-3 py-1 rounded-full border transition-colors ${
               statusFilter === f
-                ? 'bg-foreground text-background border-foreground'
-                : 'border-border text-muted-foreground hover:text-foreground'
+                ? 'bg-white text-black border-white font-medium'
+                : 'border-white/20 text-gray-400 hover:text-white hover:border-white/40'
             }`}
           >
             {f === 'open' ? 'Open' : 'All'}
@@ -240,7 +242,7 @@ export default function IssuesPanel({ productId, hasScanned }: { productId: stri
 
       <div className="space-y-2">
         {issues.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No open issues.</p>
+          <p className="text-sm text-gray-400">No open issues.</p>
         ) : (
           issues.map(issue => (
             <IssueRow key={issue.id} issue={issue} productId={productId} />

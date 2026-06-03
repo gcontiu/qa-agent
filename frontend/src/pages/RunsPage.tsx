@@ -43,15 +43,15 @@ type RunForm = z.infer<typeof runSchema>
 export function RunStatusBadge({ status }: { status: Run['status'] }) {
   switch (status) {
     case 'running':
-      return <Badge variant="secondary" className="gap-1"><Loader2 className="h-3 w-3 animate-spin" />Running</Badge>
+      return <Badge className="gap-1 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"><Loader2 className="h-3 w-3 animate-spin" />Running</Badge>
     case 'pending':
-      return <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" />Pending</Badge>
+      return <Badge className="gap-1 bg-white/5 text-gray-400 border border-white/10"><Clock className="h-3 w-3" />Pending</Badge>
     case 'done':
-      return <Badge className="gap-1 bg-green-600"><CheckCircle2 className="h-3 w-3" />Done</Badge>
+      return <Badge className="gap-1 bg-green-500/20 text-green-400 border border-green-500/30"><CheckCircle2 className="h-3 w-3" />Done</Badge>
     case 'cancelled':
-      return <Badge variant="outline" className="gap-1 text-muted-foreground"><Ban className="h-3 w-3" />Cancelled</Badge>
+      return <Badge className="gap-1 bg-white/5 text-gray-500 border border-white/10"><Ban className="h-3 w-3" />Cancelled</Badge>
     default:
-      return <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" />Failed</Badge>
+      return <Badge className="gap-1 bg-red-500/20 text-red-400 border border-red-500/30"><XCircle className="h-3 w-3" />Failed</Badge>
   }
 }
 
@@ -163,7 +163,7 @@ export default function RunsPage() {
             </p>
           )}
         </div>
-        <Button onClick={openDialog}>
+        <Button onClick={openDialog} className="bg-cyan-500 hover:bg-cyan-400 text-black">
           <Play className="h-4 w-4 mr-2" />New run
         </Button>
       </div>
@@ -179,10 +179,10 @@ export default function RunsPage() {
         />
       )}
 
-      <div className="mb-6 rounded-lg border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1">
-        <p>A <span className="font-medium text-foreground">Run</span> executes your approved specs against the live product and reports a pass/fail verdict for each scenario.</p>
-        <p>Start a run by selecting a <span className="font-medium text-foreground">Product</span> (uses its approved specs) or a <span className="font-medium text-foreground">Spec directory</span> (uses files from the <code>specs/</code> folder on the server).</p>
-        <p>Only specs with status <span className="font-medium text-foreground">approved</span> are included. Approve specs from the product's detail page before running.</p>
+      <div className="mb-6 rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-xs text-gray-400 space-y-1">
+        <p>A <span className="font-medium text-white">Run</span> executes your approved specs against the live product and reports a pass/fail verdict for each scenario.</p>
+        <p>Start a run by selecting a <span className="font-medium text-white">Product</span> (uses its approved specs) or a <span className="font-medium text-white">Spec directory</span> (uses files from the <code>specs/</code> folder on the server).</p>
+        <p>Only specs with status <span className="font-medium text-white">approved</span> are included. Approve specs from the product's detail page before running.</p>
       </div>
 
       {isLoading ? (
@@ -192,29 +192,29 @@ export default function RunsPage() {
           No runs yet. Start one from a product's detail page or use the New run button.
         </p>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
+        <div className="border border-white/10 rounded-lg overflow-hidden">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Run ID</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Pass rate</TableHead>
-                <TableHead>Started</TableHead>
+              <TableRow className="border-b border-white/10 hover:bg-transparent">
+                <TableHead className="text-gray-400">Run ID</TableHead>
+                <TableHead className="text-gray-400">Status</TableHead>
+                <TableHead className="text-gray-400">Pass rate</TableHead>
+                <TableHead className="text-gray-400">Started</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {runs.map(run => (
                 <TableRow
                   key={run.run_id}
-                  className="cursor-pointer hover:bg-muted/50"
+                  className="cursor-pointer border-b border-white/10 hover:bg-white/5"
                   onClick={() => navigate(`/runs/${encodeURIComponent(run.run_id)}`)}
                 >
-                  <TableCell className="font-mono text-sm">{run.run_id}</TableCell>
+                  <TableCell className="font-mono text-sm text-white">{run.run_id}</TableCell>
                   <TableCell><RunStatusBadge status={run.status} /></TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="text-sm text-gray-400">
                     {passRate(run) ?? '—'}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="text-sm text-gray-400">
                     {run.started_at ? new Date(run.started_at).toLocaleString() : '—'}
                   </TableCell>
                 </TableRow>

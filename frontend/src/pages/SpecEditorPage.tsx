@@ -76,24 +76,28 @@ export default function SpecEditorPage() {
           {filename}
         </button>
         <Separator orientation="vertical" className="h-4" />
-        <Badge variant={spec.approved ? 'default' : 'secondary'}>
-          {spec.approved ? 'approved' : 'draft'}
-        </Badge>
+        {filename !== 'config.yaml' && (
+          <Badge variant={spec.approved ? 'default' : 'secondary'}>
+            {spec.approved ? 'approved' : 'draft'}
+          </Badge>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => approve.mutate(!spec.approved)}
-            disabled={approve.isPending || dirty}
-            title={dirty ? 'Save before approving' : undefined}
-          >
-            {approve.isPending
-              ? <Loader2 className="h-4 w-4 animate-spin" />
-              : <CheckCircle2 className="h-4 w-4" />
-            }
-            {spec.approved ? 'Unapprove' : 'Approve'}
-          </Button>
+          {filename !== 'config.yaml' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => approve.mutate(!spec.approved)}
+              disabled={approve.isPending || dirty}
+              title={dirty ? 'Save before approving' : undefined}
+            >
+              {approve.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <CheckCircle2 className="h-4 w-4" />
+              }
+              {spec.approved ? 'Unapprove' : 'Approve'}
+            </Button>
+          )}
           <Button
             size="sm"
             onClick={() => save.mutate()}

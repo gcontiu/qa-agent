@@ -151,7 +151,7 @@ export default function ProductDetailPage() {
           </a>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Button onClick={openAnalyzeDialog} disabled={task?.status === 'running'}>
+          <Button onClick={openAnalyzeDialog} disabled={task?.status === 'running'} className="bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-60">
             {task?.status === 'running'
               ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Scanning…</>
               : <><Play className="h-4 w-4 mr-2" /> Scan</>
@@ -284,7 +284,9 @@ export default function ProductDetailPage() {
                   <TableCell>
                     {spec.filename === 'config.yaml'
                       ? <Badge variant="outline">config</Badge>
-                      : <Badge variant={spec.approved ? 'default' : 'secondary'}>
+                      : <Badge className={spec.approved
+                            ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                            : 'bg-white/5 text-gray-400 border border-white/10'}>
                           {spec.approved ? 'approved' : 'draft'}
                         </Badge>
                     }
@@ -347,7 +349,7 @@ export default function ProductDetailPage() {
             </div>
             <DialogFooter className="mt-4">
               <Button type="button" variant="outline" onClick={() => setAnalyzeOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={analyze.isPending}>
+              <Button type="submit" disabled={analyze.isPending} className="bg-cyan-500 hover:bg-cyan-400 text-black">
                 {analyze.isPending ? 'Starting…' : 'Start scan'}
               </Button>
             </DialogFooter>

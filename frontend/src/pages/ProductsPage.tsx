@@ -49,7 +49,7 @@ export default function ProductsPage() {
     <div className="p-8 max-w-4xl">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Products</h1>
-        <Button onClick={() => setOpen(true)}>
+        <Button onClick={() => setOpen(true)} className="bg-cyan-500 hover:bg-cyan-400 text-black">
           <Plus className="h-4 w-4 mr-2" />
           New product
         </Button>

@@ -181,9 +181,9 @@ export default function ProductsPage() {
             <DialogFooter className="mt-6">
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 onClick={() => { setOpen(false); reset() }}
-                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white"
+                className="text-gray-400 hover:bg-white/10 hover:text-white"
               >
                 Cancel
               </Button>

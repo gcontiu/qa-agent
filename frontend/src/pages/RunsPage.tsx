@@ -272,9 +272,9 @@ export default function RunsPage() {
             <DialogFooter className="mt-6">
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 onClick={() => setNewRunOpen(false)}
-                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white"
+                className="text-gray-400 hover:bg-white/10 hover:text-white"
               >
                 Cancel
               </Button>

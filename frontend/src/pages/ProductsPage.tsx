@@ -88,21 +88,21 @@ export default function ProductsPage() {
       {isLoading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : products.length === 0 ? (
-        <div className="border rounded-lg p-12 text-center text-muted-foreground">
+        <div className="border border-white/10 rounded-lg p-12 text-center text-gray-400">
           <p className="mb-4">No products yet.</p>
-          <Button variant="outline" onClick={() => setOpen(true)}>
+          <Button variant="outline" onClick={() => setOpen(true)} className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white">
             <Plus className="h-4 w-4 mr-2" />
             Add your first product
           </Button>
         </div>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
+        <div className="border border-white/10 rounded-lg overflow-hidden">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>URL</TableHead>
-                <TableHead>Status</TableHead>
+              <TableRow className="border-b border-white/10 hover:bg-transparent">
+                <TableHead className="text-gray-400">Name</TableHead>
+                <TableHead className="text-gray-400">URL</TableHead>
+                <TableHead className="text-gray-400">Status</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
@@ -110,13 +110,13 @@ export default function ProductsPage() {
               {products.map(p => (
                 <TableRow
                   key={p.id}
-                  className="cursor-pointer hover:bg-muted/50"
+                  className="cursor-pointer border-b border-white/10 hover:bg-white/5"
                   onClick={() => navigate(`/products/${p.id}`)}
                 >
-                  <TableCell className="font-medium">{p.name}</TableCell>
+                  <TableCell className="font-medium text-white">{p.name}</TableCell>
                   <TableCell>
                     <span
-                      className="text-muted-foreground text-sm flex items-center gap-1 hover:text-foreground"
+                      className="text-gray-400 text-sm flex items-center gap-1 hover:text-white"
                       onClick={e => { e.stopPropagation(); window.open(p.url, '_blank') }}
                     >
                       {p.url}
@@ -124,12 +124,14 @@ export default function ProductsPage() {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={p.active ? 'default' : 'secondary'}>
+                    <Badge className={p.active
+                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                      : 'bg-white/5 text-gray-400 border border-white/10'}>
                       {p.active ? 'active' : 'inactive'}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    <ChevronRight className="h-4 w-4 text-gray-500" />
                   </TableCell>
                 </TableRow>
               ))}

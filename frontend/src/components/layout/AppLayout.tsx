@@ -1,12 +1,10 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth'
 import { useQuota, QuotaProvider } from '@/contexts/quota'
-import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { LayoutDashboard, Package, Play, LogOut, TrendingUp } from 'lucide-react'
+import { Package, Play, LogOut, TrendingUp } from 'lucide-react'
 
 const NAV = [
   { to: '/products', icon: Package, label: 'Products' },
@@ -17,38 +15,9 @@ const ADMIN_NAV = [
   { to: '/admin/growth', icon: TrendingUp, label: 'Growth' },
 ]
 
-function AdminNav() {
-  const { quota } = useQuota()
-  if ((quota?.tier as string) !== 'admin') return null
-  return (
-    <>
-      <Separator className="bg-sidebar-border" />
-      <div className="px-2 py-2">
-        <p className="px-3 pb-1 text-xs font-semibold text-slate-600 uppercase tracking-wider">Admin</p>
-        {ADMIN_NAV.map(({ to, icon: Icon, label }) => (
-          <NavLink key={to} to={to}>
-            {({ isActive }) => (
-              <span className={cn(
-                'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
-              )}>
-                <Icon className="h-4 w-4" />
-                {label}
-              </span>
-            )}
-          </NavLink>
-        ))}
-      </div>
-    </>
-  )
-}
-
 function TierBadge() {
   const { quota, isLoading } = useQuota()
-  if (isLoading) return <div className="px-3 py-2 text-xs text-muted-foreground">Loading…</div>
-  if (!quota) return null
+  if (isLoading || !quota) return null
   const tier = quota.tier
   const color =
     tier === 'beta'    ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' :
@@ -58,27 +27,27 @@ function TierBadge() {
   const { runs_this_month, scans_this_month } = quota.usage
   const { runs_per_month, scans_per_month } = quota.limits
   return (
-    <div className="px-3 py-2 space-y-1.5">
+    <div className="flex items-center gap-3">
       <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-medium capitalize ${color}`}>
         {tier}
       </span>
-      <div className="text-xs text-muted-foreground space-y-0.5">
-        <div className={runs_this_month >= runs_per_month ? 'text-red-400' : ''}>
-          {runs_this_month}/{runs_per_month} runs
-        </div>
-        <div className={scans_this_month >= scans_per_month ? 'text-red-400' : ''}>
-          {scans_this_month}/{scans_per_month} scans
-        </div>
-      </div>
+      <span className={`text-xs ${runs_this_month >= runs_per_month ? 'text-red-400' : 'text-gray-500'}`}>
+        {runs_this_month}/{runs_per_month} runs
+      </span>
+      <span className={`text-xs ${scans_this_month >= scans_per_month ? 'text-red-400' : 'text-gray-500'}`}>
+        {scans_this_month}/{scans_per_month} scans
+      </span>
     </div>
   )
 }
 
 function AppLayoutInner() {
   const { session, signOut } = useAuth()
+  const { quota } = useQuota()
   const navigate = useNavigate()
   const email = session?.user?.email ?? ''
   const initials = email.slice(0, 2).toUpperCase()
+  const isAdmin = (quota?.tier as string) === 'admin'
 
   async function handleSignOut() {
     await signOut()
@@ -86,57 +55,78 @@ function AppLayoutInner() {
   }
 
   return (
-    <div className="flex h-screen bg-background">
-      {/* Sidebar */}
-      <aside className="w-56 flex flex-col border-r bg-sidebar">
-        <div className="px-4 py-5 flex items-center gap-2">
-          <LayoutDashboard className="h-5 w-5 text-sidebar-primary" />
-          <span className="font-semibold text-sidebar-foreground">Steadra</span>
-        </div>
-        <Separator className="bg-sidebar-border" />
-        <nav className="flex-1 px-2 py-3 space-y-1">
-          {NAV.map(({ to, icon: Icon, label }) => (
-            <NavLink key={to} to={to}>
-              {({ isActive }) => (
-                <span className={cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
-                  isActive
-                    ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-                    : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
-                )}>
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </span>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-        <AdminNav />
-        <Separator className="bg-sidebar-border" />
-        <TierBadge />
-        <Separator className="bg-sidebar-border" />
-        <div className="px-3 py-3">
+    <div className="min-h-screen bg-[#07091a] text-white font-sans antialiased">
+      {/* Topbar */}
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-[#07091a]/95 backdrop-blur-sm">
+        <div className="mx-auto max-w-4xl w-full px-8 h-14 flex items-center gap-6">
+          {/* Logo */}
+          <img src="/logo4.png" alt="Steadra" className="h-10 w-auto shrink-0 rounded-md" />
+
+          {/* Nav links */}
+          <nav className="flex items-center gap-1">
+            {NAV.map(({ to, icon: Icon, label }) => (
+              <NavLink key={to} to={to}>
+                {({ isActive }) => (
+                  <span className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors',
+                    isActive
+                      ? 'bg-white/10 text-white font-medium'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5',
+                  )}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </span>
+                )}
+              </NavLink>
+            ))}
+            {isAdmin && ADMIN_NAV.map(({ to, icon: Icon, label }) => (
+              <NavLink key={to} to={to}>
+                {({ isActive }) => (
+                  <span className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors',
+                    isActive
+                      ? 'bg-white/10 text-white font-medium'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5',
+                  )}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </span>
+                )}
+              </NavLink>
+            ))}
+          </nav>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Tier + usage */}
+          <TierBadge />
+
+          {/* User menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="w-full justify-start gap-2 px-2">
-                <Avatar className="h-6 w-6">
-                  <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+              <button className="flex items-center gap-2 rounded-full focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
+                <Avatar className="h-7 w-7">
+                  <AvatarFallback className="text-xs bg-white/10 text-gray-300">{initials}</AvatarFallback>
                 </Avatar>
-                <span className="text-sm truncate text-sidebar-foreground">{email}</span>
-              </Button>
+              </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-48">
-              <DropdownMenuItem onClick={handleSignOut}>
+            <DropdownMenuContent align="end" className="w-48 bg-[#0d1024] border-white/10 text-white">
+              <div className="px-2 py-1.5 text-xs text-gray-500 truncate">{email}</div>
+              <DropdownMenuItem
+                onClick={handleSignOut}
+                className="text-gray-300 focus:text-white focus:bg-white/10 cursor-pointer"
+              >
                 <LogOut className="mr-2 h-4 w-4" />
                 Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </aside>
+      </header>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      {/* Page content */}
+      <main className="mx-auto max-w-4xl w-full">
         <Outlet />
       </main>
     </div>

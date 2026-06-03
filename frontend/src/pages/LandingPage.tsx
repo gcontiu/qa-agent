@@ -98,7 +98,7 @@ export default function LandingPage() {
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <nav className="px-6 py-5 border-b border-white/5">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <span className="text-xl font-bold tracking-tight">Steadra</span>
+          <img src="/logo4.png" alt="Steadra" className="h-10 w-auto rounded-md" />
           <a href="/login" className="text-sm text-gray-400 hover:text-white transition-colors">
             Sign in →
           </a>

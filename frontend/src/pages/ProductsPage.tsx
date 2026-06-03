@@ -55,8 +55,8 @@ export default function ProductsPage() {
         </Button>
       </div>
 
-      <div className="mb-6 rounded-lg border border-border bg-muted/30 px-4 py-4 text-sm text-muted-foreground space-y-3">
-        <p className="font-medium text-foreground">What this does</p>
+      <div className="mb-6 rounded-lg border border-white/10 bg-white/5 px-4 py-4 text-sm text-gray-400 space-y-3">
+        <p className="font-medium text-white">What this does</p>
         <p>
           Point the agent at a URL. It crawls the site, understands what's there, writes a test suite
           for it, and runs that suite against the live product — with no selectors, no step definitions,
@@ -64,17 +64,17 @@ export default function ProductsPage() {
         </p>
         <ul className="space-y-1.5 text-xs">
           <li>
-            A <span className="font-medium text-foreground">Product</span> is a target site.{' '}
-            <span className="font-medium text-foreground">Scanning</span> it sends the LLM-driven
+            A <span className="font-medium text-white">Product</span> is a target site.{' '}
+            <span className="font-medium text-white">Scanning</span> it sends the LLM-driven
             analyst to explore it and produce{' '}
-            <span className="font-medium text-foreground">Specs</span> — Gherkin feature files
-            containing <span className="font-medium text-foreground">Scenarios</span> (one
+            <span className="font-medium text-white">Specs</span> — Gherkin feature files
+            containing <span className="font-medium text-white">Scenarios</span> (one
             Given/When/Then test case each). Scans also surface{' '}
-            <span className="font-medium text-foreground">Issues</span>: console errors, broken
+            <span className="font-medium text-white">Issues</span>: console errors, broken
             images, and failed network requests the agent observes while crawling.
           </li>
           <li>
-            A <span className="font-medium text-foreground">Run</span> executes your approved
+            A <span className="font-medium text-white">Run</span> executes your approved
             scenarios against the live product. The executor LLM interprets each step, drives the
             browser, and reports pass/fail with the reasoning behind every verdict.
           </li>

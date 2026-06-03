@@ -298,7 +298,26 @@ uv run qa-agent serve [--host 0.0.0.0] [--port 8000] [--reload]
 | GET | `/runs/{run_id}` | 200 / 404 | Poll run status |
 | POST | `/runs/{run_id}/cancel` | 202 / 409 | Cancel a pending/running run (409 if already terminal) |
 | GET | `/runs/{run_id}/report` | 200 / 404 | Return report.json for a completed run |
+| GET | `/runs/{run_id}/report/markdown` | 200 / 404 | Return `{"content": "<markdown text>"}` — report.md as JSON for clipboard use |
+| GET | `/runs/{run_id}/export` | 200 / 404 | Stream ZIP archive: report.json + report.md + telemetry.json + evidence/ |
+| GET | `/products/{id}/specs/export` | 200 / 404 | Stream ZIP of all feature files + config.yaml. `?approved_only=true` filters to approved specs + config |
 | GET | `/health` | 200 | Liveness probe |
+
+### Export endpoints
+
+**`GET /runs/{run_id}/export`**
+
+Streams a ZIP containing the full run artefacts. Excludes `run_status.json` (internal state). Filename: `run-{run_id}.zip`.
+
+**`GET /runs/{run_id}/report/markdown`**
+
+Returns `{"content": "..."}` — the markdown report wrapped in JSON so API clients can fetch it with the standard auth helper (which always calls `.json()`). Intended for "Copy as markdown" clipboard flows. The raw `report.md` file is also available inside the export ZIP.
+
+**`GET /products/{id}/specs/export`**
+
+Builds a ZIP in memory from the specs stored in Postgres for a given product. `config.yaml` is always included regardless of `approved_only`. Filename: `specs-{product_name}.zip`.
+
+> **Note — frontend download pattern:** `<a href download>` triggers a browser navigation with `Accept: text/html,*/*` which Vite's dev proxy intercepts and returns `index.html`. Use `api.download(path, filename)` from `frontend/src/lib/api.ts` instead. That helper does a `fetch()` with `Authorization` + `Accept: application/octet-stream`, converts the response to a Blob URL, and programmatically clicks a hidden `<a>` element — bypassing the proxy bypass.
 
 **Request body for `POST /runs`:**
 ```json

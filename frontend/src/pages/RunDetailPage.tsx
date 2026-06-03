@@ -7,10 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ArrowLeft, Ban, CheckCircle2, XCircle, AlertTriangle, Loader2, Download, Copy, Check } from 'lucide-react'
+import { ArrowLeft, Ban, CheckCircle2, XCircle, AlertTriangle, Loader2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import LogPanel from '@/components/LogPanel'
-import { useState } from 'react'
 
 interface ScenarioResult {
   requirement_id: string
@@ -51,18 +50,6 @@ export default function RunDetailPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { toast } = useToast()
-  const [copied, setCopied] = useState(false)
-
-  async function copyMarkdown() {
-    try {
-      const { content } = await api.get<{ content: string }>(`/runs/${runId}/report/markdown`)
-      await navigator.clipboard.writeText(content)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      toast({ title: 'Copy failed', variant: 'destructive' })
-    }
-  }
 
   const { data: run, isLoading: runLoading } = useQuery<Run>({
     queryKey: ['run', runId],
@@ -115,27 +102,6 @@ export default function RunDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           <RunStatusBadge status={run.status} />
-          {run.status === 'done' && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white gap-1.5"
-                onClick={copyMarkdown}
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? 'Copied!' : 'Copy as markdown'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white gap-1.5"
-                onClick={() => api.download(`/runs/${runId}/export`, `run-${runId}.zip`)}
-              >
-                <Download className="h-3.5 w-3.5" /> Download
-              </Button>
-            </>
-          )}
           {isActive && (
             <Button
               variant="outline"

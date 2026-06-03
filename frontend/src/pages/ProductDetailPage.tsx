@@ -310,51 +310,79 @@ export default function ProductDetailPage() {
 
       {/* Analyze dialog */}
       <Dialog open={analyzeOpen} onOpenChange={setAnalyzeOpen}>
-        <DialogContent onOpenAutoFocus={(e) => e.preventDefault()}>
+        <DialogContent onOpenAutoFocus={(e) => e.preventDefault()} className="bg-[#0d1024] border border-white/10 text-white">
           <DialogHeader>
-            <DialogTitle>Scan product</DialogTitle>
+            <DialogTitle className="text-white">Scan product</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit(d => analyze.mutate(d))}>
             <div className="space-y-4 py-2">
-              <div className="space-y-1">
-                <Label>URL to crawl</Label>
-                <Input {...register('url')} />
-                {errors.url && <p className="text-xs text-destructive">{errors.url.message}</p>}
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">URL to crawl</Label>
+                <Input
+                  {...register('url')}
+                  className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50"
+                />
+                {errors.url && <p className="text-xs text-red-400">{errors.url.message}</p>}
               </div>
-              <div className="space-y-1">
-                <Label>Description</Label>
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">Description</Label>
                 <Textarea
                   {...register('description')}
                   rows={3}
                   placeholder="Short description of the product for the analyst"
+                  className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50 resize-none"
                 />
-                {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
+                {errors.description && <p className="text-xs text-red-400">{errors.description.message}</p>}
               </div>
-              <div className="space-y-1">
-                <Label>Spec prefix</Label>
-                <Input {...register('spec_prefix')} className="w-24" />
-                <p className="text-xs text-gray-400">Short uppercase prefix for requirement IDs (e.g. SC, GP)</p>
-                {errors.spec_prefix && <p className="text-xs text-destructive">{errors.spec_prefix.message}</p>}
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">Spec prefix</Label>
+                <Input
+                  {...register('spec_prefix')}
+                  className="w-24 bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50"
+                />
+                <p className="text-xs text-gray-500">Short uppercase prefix for requirement IDs (e.g. SC, GP)</p>
+                {errors.spec_prefix && <p className="text-xs text-red-400">{errors.spec_prefix.message}</p>}
               </div>
-              <div className="space-y-1">
-                <Label>Pages <span className="text-gray-400">(optional)</span></Label>
-                <Input {...register('pages')} placeholder="/,/about,/contact" />
-                <p className="text-xs text-gray-400">Comma-separated paths. Leave blank to crawl the whole site.</p>
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">
+                  Pages <span className="text-gray-500 font-normal">(optional)</span>
+                </Label>
+                <Input
+                  {...register('pages')}
+                  placeholder="/,/about,/contact"
+                  className="bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50"
+                />
+                <p className="text-xs text-gray-500">Comma-separated paths. Leave blank to crawl the whole site.</p>
               </div>
-              <div className="space-y-1">
-                <Label>Max scenarios per page <span className="text-gray-400">(optional)</span></Label>
-                <Input {...register('max_scenarios')} type="number" min={1} className="w-28" placeholder="e.g. 3" />
-                <p className="text-xs text-gray-400">Hard cap on scenarios generated per feature file.</p>
+              <div className="space-y-1.5">
+                <Label className="text-gray-300">
+                  Max scenarios per page <span className="text-gray-500 font-normal">(optional)</span>
+                </Label>
+                <Input
+                  {...register('max_scenarios')}
+                  type="number"
+                  min={1}
+                  className="w-28 bg-white/5 border-white/10 text-white placeholder:text-gray-600 focus:border-cyan-500/50"
+                  placeholder="e.g. 3"
+                />
+                <p className="text-xs text-gray-500">Hard cap on scenarios generated per feature file.</p>
               </div>
             </div>
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setAnalyzeOpen(false)}>Cancel</Button>
+            <DialogFooter className="mt-6">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAnalyzeOpen(false)}
+                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white"
+              >
+                Cancel
+              </Button>
               <Button type="submit" disabled={analyze.isPending} className="bg-cyan-500 hover:bg-cyan-400 text-black">
                 {analyze.isPending ? 'Starting…' : 'Start scan'}
               </Button>
             </DialogFooter>
             {analyze.isError && (
-              <p className="text-xs text-destructive mt-2">
+              <p className="text-xs text-red-400 mt-2">
                 {analyze.error instanceof Error ? analyze.error.message : 'Error'}
               </p>
             )}

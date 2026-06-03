@@ -21,22 +21,11 @@ import type { ComponentProps } from 'react'
 const SelectInDialog = Select as React.ComponentType<ComponentProps<typeof Select> & { modal?: boolean }>
 import { Play, Loader2, CheckCircle2, XCircle, Clock, Ban } from 'lucide-react'
 
-// ── source mode toggle ────────────────────────────────────────────────────────
-type SourceMode = 'product' | 'spec_dir'
-
-const productSchema = z.object({
-  mode: z.literal('product'),
+const runSchema = z.object({
   product_id: z.string().min(1, 'Required'),
   executor_model: z.string().optional(),
   max_scenarios: z.string().optional(),
 })
-const specDirSchema = z.object({
-  mode: z.literal('spec_dir'),
-  spec_dir: z.string().min(1, 'Required'),
-  executor_model: z.string().optional(),
-  max_scenarios: z.string().optional(),
-})
-const runSchema = z.discriminatedUnion('mode', [productSchema, specDirSchema])
 type RunForm = z.infer<typeof runSchema>
 
 // ── status badge ──────────────────────────────────────────────────────────────
@@ -68,7 +57,6 @@ export default function RunsPage() {
   const qc = useQueryClient()
   const { quota, refresh: refreshQuota } = useQuota()
   const [newRunOpen, setNewRunOpen] = useState(false)
-  const [sourceMode, setSourceMode] = useState<SourceMode>('product')
   const [quotaModal, setQuotaModal] = useState<{ type: 'run_blocked' | 'scan_blocked'; used: number; limit: number; tier: string } | null>(null)
 
   const { data: runs = [], isLoading } = useQuery<Run[]>({
@@ -82,47 +70,27 @@ export default function RunsPage() {
     },
   })
 
-  const { data: specDirs = [] } = useQuery<string[]>({
-    queryKey: ['spec-dirs'],
-    queryFn: () => api.get('/spec-dirs'),
-    enabled: newRunOpen,
-  })
-
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: ['products'],
     queryFn: () => api.get('/products'),
-    enabled: newRunOpen && sourceMode === 'product',
+    enabled: newRunOpen,
   })
 
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<RunForm>({
     resolver: zodResolver(runSchema),
-    defaultValues: { mode: 'product', product_id: '', executor_model: '', max_scenarios: '' },
+    defaultValues: { product_id: '', executor_model: '', max_scenarios: '' },
   })
 
   function openDialog() {
-    setSourceMode('product')
-    reset({ mode: 'product', product_id: '', executor_model: '', max_scenarios: '' })
+    reset({ product_id: '', executor_model: '', max_scenarios: '' })
     setNewRunOpen(true)
-  }
-
-  function switchMode(mode: SourceMode) {
-    setSourceMode(mode)
-    if (mode === 'product') {
-      reset({ mode: 'product', product_id: '', executor_model: '', max_scenarios: '' })
-    } else {
-      reset({ mode: 'spec_dir', spec_dir: '', executor_model: '', max_scenarios: '' })
-    }
   }
 
   const create = useMutation({
     mutationFn: (data: RunForm) => {
       const maxS = data.max_scenarios ? parseInt(data.max_scenarios, 10) : undefined
-      const body =
-        data.mode === 'product'
-          ? { product_id: data.product_id }
-          : { spec_dir: `specs/${data.spec_dir}` }
       return api.post<Run>('/runs', {
-        ...body,
+        product_id: data.product_id,
         executor_model: data.executor_model || undefined,
         max_scenarios: maxS && !isNaN(maxS) ? maxS : undefined,
       })
@@ -181,7 +149,6 @@ export default function RunsPage() {
 
       <div className="mb-6 rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-xs text-gray-400 space-y-1">
         <p>A <span className="font-medium text-white">Run</span> executes your approved specs against the live product and reports a pass/fail verdict for each scenario.</p>
-        <p>Start a run by selecting a <span className="font-medium text-white">Product</span> (uses its approved specs) or a <span className="font-medium text-white">Spec directory</span> (uses files from the <code>specs/</code> folder on the server).</p>
         <p>Only specs with status <span className="font-medium text-white">approved</span> are included. Approve specs from the product's detail page before running.</p>
       </div>
 
@@ -232,91 +199,39 @@ export default function RunsPage() {
           <form onSubmit={handleSubmit(d => create.mutate(d))}>
             <div className="space-y-4 py-2">
 
-              {/* source toggle */}
-              <div className="flex gap-1 p-1 bg-muted rounded-md w-fit">
-                <button
-                  type="button"
-                  onClick={() => switchMode('product')}
-                  className={`px-3 py-1 text-sm rounded transition-colors ${
-                    sourceMode === 'product'
-                      ? 'bg-background shadow text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Product
-                </button>
-                <button
-                  type="button"
-                  onClick={() => switchMode('spec_dir')}
-                  className={`px-3 py-1 text-sm rounded transition-colors ${
-                    sourceMode === 'spec_dir'
-                      ? 'bg-background shadow text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Spec dir
-                </button>
+              <div className="space-y-1">
+                <Label>Product</Label>
+                <Controller
+                  name="product_id"
+                  control={control}
+                  render={({ field }) => (
+                    <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={products.length === 0 ? 'No products found' : 'Select a product…'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {products.map(p => (
+                          <SelectItem key={p.id} value={p.id}>
+                            <span>{p.name}</span>
+                            <span className="ml-2 text-muted-foreground text-xs">{p.url}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </SelectInDialog>
+                  )}
+                />
+                {errors.product_id && (
+                  <p className="text-xs text-destructive">{errors.product_id.message}</p>
+                )}
               </div>
-
-              {/* source-specific field */}
-              {sourceMode === 'product' ? (
-                <div className="space-y-1">
-                  <Label>Product</Label>
-                  <Controller
-                    name={'product_id' as never}
-                    control={control}
-                    render={({ field }) => (
-                      <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value as string}>
-                        <SelectTrigger>
-                          <SelectValue placeholder={products.length === 0 ? 'No products found' : 'Select a product…'} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {products.map(p => (
-                            <SelectItem key={p.id} value={p.id}>
-                              <span>{p.name}</span>
-                              <span className="ml-2 text-muted-foreground text-xs">{p.url}</span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </SelectInDialog>
-                    )}
-                  />
-                  {'product_id' in errors && errors.product_id && (
-                    <p className="text-xs text-destructive">{errors.product_id.message as string}</p>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <Label>Spec directory</Label>
-                  <Controller
-                    name={'spec_dir' as never}
-                    control={control}
-                    render={({ field }) => (
-                      <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value as string}>
-                        <SelectTrigger>
-                          <SelectValue placeholder={specDirs.length === 0 ? 'No spec dirs found' : 'Select a spec directory…'} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {specDirs.map(d => (
-                            <SelectItem key={d} value={d}>{d}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </SelectInDialog>
-                    )}
-                  />
-                  {'spec_dir' in errors && errors.spec_dir && (
-                    <p className="text-xs text-destructive">{errors.spec_dir.message as string}</p>
-                  )}
-                </div>
-              )}
 
               <div className="space-y-1">
                 <Label>Executor model <span className="text-muted-foreground">(optional)</span></Label>
                 <Controller
-                  name={'executor_model' as never}
+                  name="executor_model"
                   control={control}
                   render={({ field }) => (
-                    <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value as string}>
+                    <SelectInDialog modal={false} onValueChange={field.onChange} value={field.value}>
                       <SelectTrigger>
                         <SelectValue placeholder="Default (Haiku — fastest, cheapest)" />
                       </SelectTrigger>
@@ -339,6 +254,7 @@ export default function RunsPage() {
                   )}
                 />
               </div>
+
               <div className="space-y-1">
                 <Label>Max scenarios <span className="text-muted-foreground">(optional)</span></Label>
                 <Input {...register('max_scenarios')} type="number" min={1} className="w-28" />

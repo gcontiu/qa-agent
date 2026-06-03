@@ -127,7 +127,15 @@ Feature: <Product> — <Page Name>
 
 ### Language
 
-Write scenario descriptions in the same language as the site. Step text (Given/When/Then) may be in Romanian or English, matching the site's locale.
+**Write all scenarios in English by default** — Feature name, Background, scenario descriptions, and step text (Given/When/Then).
+
+The only exception: when asserting a specific visible text element that appears on the page in another language, use the exact page text in that language for that value only. Everything else stays in English.
+
+Examples:
+- ✅ `Then the navigation contains a link "Acasă"` — correct: English sentence, Romanian value preserved
+- ✅ `Then the button "Adaugă în coș" is visible` — correct: Romanian label preserved as-is
+- ❌ `Then butonul "Adaugă în coș" este vizibil` — incorrect: step text translated to Romanian
+- ❌ `Then the button "Add to cart" is visible` — incorrect: translated away from actual page text
 
 ### Quality rules
 

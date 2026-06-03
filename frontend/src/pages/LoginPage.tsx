@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth'
+import logo4 from '@/assets/logo4.png'
 
 export default function LoginPage() {
   const { signIn, signInWithGitHub, sendMagicLink } = useAuth()
@@ -43,7 +44,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <img src="/logo4.png" alt="Steadra" className="h-10 w-auto rounded-md" />
+          <img src={logo4} alt="Steadra" className="h-10 w-auto rounded-md" />
         </div>
 
         {/* Card */}

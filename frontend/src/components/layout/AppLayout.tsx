@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { Package, Play, LogOut, TrendingUp } from 'lucide-react'
+import logo4 from '@/assets/logo4.png'
 
 const NAV = [
   { to: '/products', icon: Package, label: 'Products' },
@@ -60,7 +61,7 @@ function AppLayoutInner() {
       <header className="sticky top-0 z-40 border-b border-white/5 bg-[#07091a]/95 backdrop-blur-sm">
         <div className="mx-auto max-w-4xl w-full px-8 h-14 flex items-center gap-6">
           {/* Logo */}
-          <img src="/logo4.png" alt="Steadra" className="h-10 w-auto shrink-0 rounded-md" />
+          <img src={logo4} alt="Steadra" className="h-10 w-auto shrink-0 rounded-md" />
 
           {/* Nav links */}
           <nav className="flex items-center gap-1">

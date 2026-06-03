@@ -153,11 +153,14 @@ export default function ProductDetailPage() {
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
             {specs.length > 0 && (
-              <a href={`/products/${id}/specs/export`} download>
-                <Button variant="outline" size="sm" className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white gap-1.5">
-                  <Download className="h-3.5 w-3.5" /> Download specs
-                </Button>
-              </a>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white gap-1.5"
+                onClick={() => api.download(`/products/${id}/specs/export`, `specs-${product.name}.zip`)}
+              >
+                <Download className="h-3.5 w-3.5" /> Download specs
+              </Button>
             )}
             <Button onClick={openAnalyzeDialog} disabled={task?.status === 'running'} className="bg-cyan-500 hover:bg-cyan-400 text-black disabled:opacity-60">
               {task?.status === 'running'

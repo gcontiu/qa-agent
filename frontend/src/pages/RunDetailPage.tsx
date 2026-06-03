@@ -126,11 +126,14 @@ export default function RunDetailPage() {
                 {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? 'Copied!' : 'Copy as markdown'}
               </Button>
-              <a href={`/runs/${runId}/export`} download>
-                <Button variant="outline" size="sm" className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white gap-1.5">
-                  <Download className="h-3.5 w-3.5" /> Download
-                </Button>
-              </a>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white gap-1.5"
+                onClick={() => api.download(`/runs/${runId}/export`, `run-${runId}.zip`)}
+              >
+                <Download className="h-3.5 w-3.5" /> Download
+              </Button>
             </>
           )}
           {isActive && (

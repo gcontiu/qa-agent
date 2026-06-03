@@ -48,6 +48,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function download(path: string, filename: string): Promise<void> {
+  const headers: Record<string, string> = { 'Accept': 'application/octet-stream' }
+  if (_token) headers['Authorization'] = `Bearer ${_token}`
+  const res = await fetch(path, { headers })
+  if (res.status === 401) {
+    setToken(null)
+    window.location.replace('/login')
+    return
+  }
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -57,4 +78,5 @@ export const api = {
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  download,
 }

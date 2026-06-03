@@ -24,7 +24,7 @@ function AdminNav() {
     <>
       <Separator className="bg-sidebar-border" />
       <div className="px-2 py-2">
-        <p className="px-3 pb-1 text-xs font-semibold text-slate-600 uppercase tracking-wider">Admin</p>
+        <p className="px-3 pb-1 text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider">Admin</p>
         {ADMIN_NAV.map(({ to, icon: Icon, label }) => (
           <NavLink key={to} to={to}>
             {({ isActive }) => (
@@ -86,7 +86,7 @@ function AppLayoutInner() {
   }
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="dark flex h-screen bg-background">
       {/* Sidebar */}
       <aside className="w-56 flex flex-col border-r bg-sidebar">
         <div className="px-4 py-4 flex items-center">

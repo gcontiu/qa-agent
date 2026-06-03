@@ -704,8 +704,8 @@ async def get_report_markdown(
     run_id: str,
     output: str = "reports",
     user: CurrentUser = Depends(get_current_user),
-) -> Response:
-    """Return the report.md for a completed run as plain text."""
+) -> dict:
+    """Return the report.md content wrapped in JSON so api.get() can fetch it with auth."""
     status_file = Path(output) / f"run-{run_id}" / "run_status.json"
     if status_file.exists():
         state = json.loads(status_file.read_text())
@@ -714,7 +714,7 @@ async def get_report_markdown(
     md_file = Path(output) / f"run-{run_id}" / "report.md"
     if not md_file.exists():
         raise HTTPException(status_code=404, detail=f"Report markdown for run '{run_id}' not found")
-    return Response(content=md_file.read_text(), media_type="text/plain")
+    return {"content": md_file.read_text()}
 
 
 @app.get("/runs/{run_id}/export")

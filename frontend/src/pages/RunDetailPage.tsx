@@ -55,8 +55,8 @@ export default function RunDetailPage() {
 
   async function copyMarkdown() {
     try {
-      const text = await fetch(`/runs/${runId}/report/markdown`).then(r => r.text())
-      await navigator.clipboard.writeText(text)
+      const { content } = await api.get<{ content: string }>(`/runs/${runId}/report/markdown`)
+      await navigator.clipboard.writeText(content)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {

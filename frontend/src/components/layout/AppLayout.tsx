@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { LayoutDashboard, Package, Play, LogOut, TrendingUp } from 'lucide-react'
+import { Package, Play, LogOut, TrendingUp } from 'lucide-react'
 
 const NAV = [
   { to: '/products', icon: Package, label: 'Products' },
@@ -89,9 +89,8 @@ function AppLayoutInner() {
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
       <aside className="w-56 flex flex-col border-r bg-sidebar">
-        <div className="px-4 py-5 flex items-center gap-2">
-          <LayoutDashboard className="h-5 w-5 text-sidebar-primary" />
-          <span className="font-semibold text-sidebar-foreground">Steadra</span>
+        <div className="px-4 py-4 flex items-center">
+          <img src="/logo4.png" alt="Steadra" className="h-10 w-auto rounded-md" />
         </div>
         <Separator className="bg-sidebar-border" />
         <nav className="flex-1 px-2 py-3 space-y-1">

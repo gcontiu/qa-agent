@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, Zap, ListChecks, Moon, Check, ChevronDown, ChevronUp, User } from 'lucide-react'
 import { useAuth } from '@/contexts/auth'
 import logo4 from '@/assets/logo4.png'
@@ -99,7 +99,7 @@ export default function LandingPage() {
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <nav className="px-6 py-5 border-b border-white/5">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <img src={logo4} alt="Steadra" className="h-10 w-auto rounded-md" />
+          <Link to="/"><img src={logo4} alt="Steadra" className="h-10 w-auto rounded-md" /></Link>
           <a href="/login" className="text-sm text-gray-400 hover:text-white transition-colors">
             Sign in →
           </a>

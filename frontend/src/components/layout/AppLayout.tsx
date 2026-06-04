@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Link, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth'
 import { useQuota, QuotaProvider } from '@/contexts/quota'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -61,7 +61,9 @@ function AppLayoutInner() {
       <header className="sticky top-0 z-40 border-b border-white/5 bg-[#07091a]/95 backdrop-blur-sm">
         <div className="mx-auto max-w-4xl w-full px-8 h-14 flex items-center gap-6">
           {/* Logo */}
-          <img src={logo4} alt="Steadra" className="h-10 w-auto shrink-0 rounded-md" />
+          <Link to="/products">
+            <img src={logo4} alt="Steadra" className="h-10 w-auto shrink-0 rounded-md" />
+          </Link>
 
           {/* Nav links */}
           <nav className="flex items-center gap-1">

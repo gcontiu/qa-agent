@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth'
 import logo4 from '@/assets/logo4.png'
 
@@ -44,7 +44,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex justify-center mb-8">
-          <img src={logo4} alt="Steadra" className="h-10 w-auto rounded-md" />
+          <Link to="/"><img src={logo4} alt="Steadra" className="h-10 w-auto rounded-md" /></Link>
         </div>
 
         {/* Card */}

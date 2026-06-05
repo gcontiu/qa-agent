@@ -83,6 +83,8 @@ export interface Run {
   run_id: string
   status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
   spec_dir: string | null
+  product_id: string | null
+  product_name: string | null
   started_at: string | null
   completed_at: string | null
   summary: RunSummary | null

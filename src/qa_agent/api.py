@@ -312,6 +312,8 @@ class RunStatus(BaseModel):
     run_id: str
     status: Literal["pending", "running", "done", "failed", "cancelled"]
     spec_dir: str | None = None
+    product_id: str | None = None
+    product_name: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
     summary: RunSummary | None = None
@@ -593,6 +595,8 @@ async def create_run(
         "run_id": run_id,
         "status": "pending",
         "spec_dir": spec_key,
+        "product_id": req.product_id or None,
+        "product_name": product["name"] if req.product_id else None,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "user_id": user.user_id,
     }

@@ -19,7 +19,7 @@ import type { ComponentProps } from 'react'
 
 // modal prop exists in Radix but is missing from shadcn's re-exported types
 const SelectInDialog = Select as React.ComponentType<ComponentProps<typeof Select> & { modal?: boolean }>
-import { Play, Loader2, CheckCircle2, XCircle, Clock, Ban } from 'lucide-react'
+import { Play, Loader2, CheckCircle2, XCircle, Clock, Ban, ChevronDown, ChevronRight } from 'lucide-react'
 
 const runSchema = z.object({
   product_id: z.string().min(1, 'Required'),
@@ -51,6 +51,53 @@ function passRate(run: Run): string | null {
   return `${s.passed}/${s.total} (${pct}%)`
 }
 
+// ── grouped runs helpers ───────────────────────────────────────────────────────
+
+interface RunGroup {
+  key: string
+  label: string
+  runs: Run[]
+}
+
+function groupRuns(runs: Run[], products: Product[]): RunGroup[] {
+  const productMap = new Map(products.map(p => [p.id, p.name]))
+  const groups = new Map<string, RunGroup>()
+
+  for (const run of runs) {
+    let key: string
+    let label: string
+
+    if (run.product_id) {
+      key = run.product_id
+      label = run.product_name ?? productMap.get(run.product_id) ?? run.product_id
+    } else if (run.spec_dir?.startsWith('product:')) {
+      key = run.spec_dir.slice('product:'.length)
+      label = productMap.get(key) ?? key
+    } else {
+      key = '__adhoc__'
+      label = 'Ad-hoc / spec-dir runs'
+    }
+
+    if (!groups.has(key)) groups.set(key, { key, label, runs: [] })
+    groups.get(key)!.runs.push(run)
+  }
+
+  return Array.from(groups.values())
+}
+
+function groupPassRate(runs: Run[]): string | null {
+  const totals = runs.reduce(
+    (acc, r) => {
+      if (r.summary) { acc.passed += r.summary.passed; acc.total += r.summary.total }
+      return acc
+    },
+    { passed: 0, total: 0 },
+  )
+  if (totals.total === 0) return null
+  const pct = Math.round((totals.passed / totals.total) * 100)
+  return `${totals.passed}/${totals.total} (${pct}%)`
+}
+
 // ── page ──────────────────────────────────────────────────────────────────────
 export default function RunsPage() {
   const navigate = useNavigate()
@@ -58,6 +105,7 @@ export default function RunsPage() {
   const { quota, refresh: refreshQuota } = useQuota()
   const [newRunOpen, setNewRunOpen] = useState(false)
   const [quotaModal, setQuotaModal] = useState<{ type: 'run_blocked' | 'scan_blocked'; used: number; limit: number; tier: string } | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const { data: runs = [], isLoading } = useQuery<Run[]>({
     queryKey: ['runs'],
@@ -73,7 +121,6 @@ export default function RunsPage() {
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: ['products'],
     queryFn: () => api.get('/products'),
-    enabled: newRunOpen,
   })
 
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<RunForm>({
@@ -159,35 +206,72 @@ export default function RunsPage() {
           No runs yet. Start one from a product's detail page or use the New run button.
         </p>
       ) : (
-        <div className="border border-white/10 rounded-lg overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-b border-white/10 hover:bg-transparent">
-                <TableHead className="text-gray-400">Run ID</TableHead>
-                <TableHead className="text-gray-400">Status</TableHead>
-                <TableHead className="text-gray-400">Pass rate</TableHead>
-                <TableHead className="text-gray-400">Started</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {runs.map(run => (
-                <TableRow
-                  key={run.run_id}
-                  className="cursor-pointer border-b border-white/10 hover:bg-white/5"
-                  onClick={() => navigate(`/runs/${encodeURIComponent(run.run_id)}`)}
+        <div className="space-y-3">
+          {groupRuns(runs, products).map(group => {
+            const isOpen = !collapsed.has(group.key)
+            const roll = groupPassRate(group.runs)
+            const hasActive = group.runs.some(r => r.status === 'running' || r.status === 'pending')
+            return (
+              <div key={group.key} className="border border-white/10 rounded-lg overflow-hidden">
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-white/8 text-left transition-colors"
+                  onClick={() => setCollapsed(prev => {
+                    const next = new Set(prev)
+                    next.has(group.key) ? next.delete(group.key) : next.add(group.key)
+                    return next
+                  })}
                 >
-                  <TableCell className="font-mono text-sm text-white">{run.run_id}</TableCell>
-                  <TableCell><RunStatusBadge status={run.status} /></TableCell>
-                  <TableCell className="text-sm text-gray-400">
-                    {passRate(run) ?? '—'}
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-400">
-                    {run.started_at ? new Date(run.started_at).toLocaleString() : '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                  {isOpen
+                    ? <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" />
+                    : <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />
+                  }
+                  <span className="font-medium text-white text-sm flex-1">{group.label}</span>
+                  <span className="text-xs text-gray-500 mr-3">{group.runs.length} run{group.runs.length !== 1 ? 's' : ''}</span>
+                  {hasActive && (
+                    <Badge className="gap-1 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 mr-3">
+                      <Loader2 className="h-3 w-3 animate-spin" />Active
+                    </Badge>
+                  )}
+                  {roll ? (
+                    <span className="text-xs text-gray-400 font-mono">{roll}</span>
+                  ) : (
+                    <span className="text-xs text-gray-600">—</span>
+                  )}
+                </button>
+
+                {isOpen && (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-b border-white/10 hover:bg-transparent">
+                        <TableHead className="text-gray-400">Run ID</TableHead>
+                        <TableHead className="text-gray-400">Status</TableHead>
+                        <TableHead className="text-gray-400">Pass rate</TableHead>
+                        <TableHead className="text-gray-400">Started</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {group.runs.map(run => (
+                        <TableRow
+                          key={run.run_id}
+                          className="cursor-pointer border-b border-white/10 last:border-0 hover:bg-white/5"
+                          onClick={() => navigate(`/runs/${encodeURIComponent(run.run_id)}`)}
+                        >
+                          <TableCell className="font-mono text-sm text-white">{run.run_id}</TableCell>
+                          <TableCell><RunStatusBadge status={run.status} /></TableCell>
+                          <TableCell className="text-sm text-gray-400">
+                            {passRate(run) ?? '—'}
+                          </TableCell>
+                          <TableCell className="text-sm text-gray-400">
+                            {run.started_at ? new Date(run.started_at).toLocaleString() : '—'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 

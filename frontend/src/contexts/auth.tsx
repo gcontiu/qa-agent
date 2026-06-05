@@ -81,9 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function sendMagicLink(email: string) {
     if (!client) throw new Error('Not initialised')
+    // Land on /set-password so "Forgot password? Get a login link" actually lets the
+    // user set a password (not just log in). Requires /set-password in Supabase's
+    // Redirect URLs allow-list (explicit entry — the /** wildcard does not match it).
     const { error } = await client.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/products` },
+      options: { emailRedirectTo: `${window.location.origin}/set-password` },
     })
     if (error) throw error
   }

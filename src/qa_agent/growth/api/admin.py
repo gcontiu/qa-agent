@@ -177,6 +177,16 @@ def make_router(
         if not magic_link:
             raise HTTPException(502, f"Supabase returned no action_link. Response: {str(data)[:300]}")
 
+        # Diagnostic: log requested vs. returned redirect_to (no token leak — redirect_to
+        # is a separate query param). If returned == requested, Supabase accepted it and any
+        # failure is at click-time (allow-list), pointing at the redirect-URL allow-list.
+        from urllib.parse import urlparse, parse_qs
+        returned_redirect = parse_qs(urlparse(magic_link).query).get("redirect_to", ["<none>"])[0]
+        logger.info(
+            "INVITE LINK email=%s requested_redirect=%s returned_redirect=%s",
+            entry.email, redirect_to, returned_redirect,
+        )
+
         if email:
             subject, html = render_invite(entry, magic_link)
             await email.send(to=entry.email, subject=subject, html=html)

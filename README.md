@@ -27,6 +27,11 @@ uv run qa-agent analyze <url> -d "<description>" -p <PREFIX> -o specs/<name>
 # Analyze a site — scoped to specific pages only (faster, cheaper on large sites)
 uv run qa-agent analyze <url> -d "<description>" -p <PREFIX> --pages "/,/about,/contact" -o specs/<name>
 
+# Mini-scan a URL locally (no DB, no email — useful for debugging waitlist scan failures)
+uv run qa-agent miniscan <url>
+uv run qa-agent miniscan <url> --timeout 120          # custom wall-time cap (default 90s)
+uv run qa-agent miniscan <url> --output result.json   # save JSON result to file
+
 # Start the HTTP API server (Phase 1 — cloud-readiness)
 uv run qa-agent serve                    # default 0.0.0.0:8000
 uv run qa-agent serve --port 9000 --reload  # dev mode with auto-reload

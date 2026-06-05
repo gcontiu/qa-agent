@@ -487,17 +487,34 @@ def _assert_run_owner(state: dict, user: CurrentUser, run_id: str) -> None:
 
 @app.post("/me/activate")
 async def activate_account(user: CurrentUser = Depends(get_current_user)) -> dict:
-    """Called by the frontend on SIGNED_IN to seed the beta user's product."""
+    """Called by the frontend on SIGNED_IN to seed the beta user's product and grant tier."""
     from qa_agent.growth.db import waitlist as db_waitlist
     row = await db_waitlist.get_by_email(user.email)
     if not row:
         return {"status": "no_waitlist_entry"}
     entry = db_waitlist._row_to_entry(row)
+
+    # Grant beta tier for any invited user (webhook may not be configured).
+    if entry.invite_status in ("sent", "requested", "accepted"):
+        try:
+            await _funnel._hooks.grant_tier(user.user_id, "beta")
+        except Exception as exc:
+            print(f"ACTIVATE grant_tier failed user={user.user_id}: {exc}", flush=True)
+
+    # Mark invite accepted + link user_id (idempotent fallback for missing webhook).
+    if entry.invite_status in ("sent", "requested"):
+        try:
+            await db_waitlist.mark_invite_accepted(entry.id, user.user_id)
+            await db_waitlist.insert_beta_enrollment(user.user_id, entry.id)
+        except Exception as exc:
+            print(f"ACTIVATE mark_invite_accepted failed user={user.user_id}: {exc}", flush=True)
+
     if entry.scan_result:
         try:
             await _funnel._hooks.seed_user_account(user.user_id, entry)
         except Exception as exc:
             print(f"ACTIVATE seed_user_account failed user={user.user_id}: {exc}", flush=True)
+
     return {"status": "ok"}
 
 

@@ -195,3 +195,62 @@ Reflects the constraints agreed in `docs/business-decisions.md` BD-005 § "Pre-i
 - **No empty-state onboarding.** A new user never sees a blank product screen — their site, their specs, their report are already there.
 - **No "we'll be in touch" emails.** Every email in the sequence either delivers value or asks for a specific action.
 - **No support-team-only feedback channel during beta.** Detractors get the founder's calendar.
+
+---
+
+## Acquisition (€300 budget)
+
+The beta funnel above is a strong *mid-to-bottom* funnel, but it assumes traffic. This section defines where the first 50 beta signups come from on a **hard €300 marketing budget**.
+
+### Core principle: €300 buys leverage, not ad spend
+
+€300 does not buy acquisition for a B2B dev-tool. On Google Ads, "QA testing / automated testing" runs €4–12 CPC → €300 = ~30–50 cold clicks, ~0 conversions. **The money goes on tooling that multiplies the founder's manual effort; traffic is produced by the founder + the mini-scan offer, not by ad spend.**
+
+The unfair advantage for cold outreach: we can open with **"we already scanned your site — here are 3 bugs"** instead of "let me sell you something." Every channel below leans on that hook. It ties directly to the **instant mini-scan** (Beta funnel § 2) — the same capped Opus scan that powers waitlist activation also powers cold outreach.
+
+### Focus: one ICP for the first 50
+
+**Small web agencies (3–15 people).** Rationale: natural leverage ("test 10 client sites with one config" — already in the landing copy), real pain (they ship client sites with bugs and lose face), easy to find (public portfolios list client URLs = ready-made mini-scan ammunition), and good LTV (multi-site, multi-seat). E-commerce checkout is plan B. **Do not run all three segments at n=50** — segmentation (Beta funnel § 5) earns its keep only once there's data.
+
+### Budget allocation
+
+| Line | Tool / purpose | Cost | Why |
+|---|---|---|---|
+| Email outbound infra | 1 secondary `.com` domain (protect steadra.dev) + 2 Google Workspace inboxes | ~€10 + ~€48 (2 × ~€6 × 2 mo) = **~€58** | Deliverability. Never cold-email from the primary domain. |
+| Sending + warmup | Instantly.ai or Smartlead starter (~€30–37/mo × 2 mo) | **~€70** | Auto warmup + sequences + tracking. |
+| Lead sourcing | Apollo.io credits or scraped agency portfolios (verified emails) | **~€50** | 300–500 target agencies with one client URL each. |
+| 1 paid experiment | Niche dev/freelance newsletter sponsorship **or** €50 Reddit Ads on r/webdev | **~€60** | One measured test, not spray. Kill if it doesn't convert. |
+| Reserve | Loom Pro / Calendly Pro / buffer | **~€62** | Personalised Loom walkthroughs lift cold-reply rates sharply. |
+| **Total** | | **~€300** | |
+
+### Channels, in order of leverage
+
+**1. Outbound "scan-first" — primary channel (cost = tooling above)**
+- Build a list of ~300 agencies; for each, pull one client URL from their portfolio.
+- Run the **mini-scan on that URL before writing**.
+- Email 1: *"I tested [client-site] from your portfolio and found 3 things — checkout throws a 500 on mobile, 2 dead links in the footer. Full report, free: [link]. I'm building an automated QA junior for agencies like yours."*
+- Volume: 30–40 emails/day/inbox × 2 = ~60–80/day. 300 contacts → ~1 week of sending.
+- Target: 25–40% open, 8–15% reply (the offer is concrete) → 10–20 conversations → 5–10 of the first 50.
+
+**2. Launch spikes — free, one-shot (zero budget)**
+- **Show HN** ("Show HN: Steadra — point it at a URL, get a prioritized bug report"). HN audience = the target devs. Ensure landing + mini-scan survive the spike.
+- **Product Hunt** — scheduled, with 10–15 first-hour upvoters lined up.
+- 2–3 relevant subreddits (r/webdev, r/SaaS, r/agency) — value posts ("what I learned scanning 50 sites"), not spam.
+- Space them out; each is a 100–500 visitor pulse.
+
+**3. Content / community drip — free, slow, compounding (zero budget)**
+- 1 post/week on X/LinkedIn with a **real bug found** on a public site (anonymised or public): *"Scanned 10 Romanian e-commerce sites. 6 had broken mobile checkout. 🧵"* — "scan-and-tell" is perfectly shareable for a QA tool.
+- Answer in agency/freelance communities where people complain about production bugs.
+
+### 4-week plan
+
+| Week | Focus | Target |
+|---|---|---|
+| 1 | Email infra + warmup running; build the 300-list | Warm inboxes, list ready |
+| 2 | 60–80 scan-first outbound/day; prep Show HN | 15–25 conversations open |
+| 3 | Show HN + Product Hunt launch; continue outbound | Traffic spike + first 20–30 signups |
+| 4 | Outbound follow-up + 1 paid experiment + content drip | 50 beta spots filled |
+
+### Honest expectation
+
+At €300, hitting 50 beta signups is **feasible but founder-labour-dominated** — the budget only scales the manual outreach from ~10 to ~60 touches/day. Paid acquisition is revisited only after beta → paid clears 15% (Beta funnel § What we measure).

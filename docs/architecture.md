@@ -361,6 +361,79 @@ Two endpoints carry per-user limits enforced by `slowapi`: `POST /runs` (10/hour
 
 ---
 
+## CI / Deploy-Triggered Scans (Proposed — not yet implemented)
+
+A scan that runs automatically on every deploy turns Steadra from a one-shot *report* into a recurring *monitor* — the strongest retention and conversion hook for a QA tool. This section is a design, not shipped code.
+
+### The blocker today
+
+`POST /runs` already does everything needed to start a run from a `product_id` and run **only approved specs**. But it is authenticated exclusively via Supabase JWT (`Depends(get_current_user)`, see § Authentication). A CI pipeline or a deploy webhook has no interactive login → **there is no programmatic way to call it today.** That is the first thing to build. The second is a way to point the run at the freshly-deployed URL (a preview deployment), not the spec's baked-in base URL.
+
+### Phase 0 — API keys per user (blocking prerequisite)
+
+- New Postgres table `api_keys`: `id, user_id, key_hash, prefix, created_at, last_used_at, revoked`. Store only the hash (`sha256`); show the full key once on creation.
+- Token format: `qa_live_<random>`. The `prefix` (e.g. `qa_live_a1b2`) is stored in clear for display/lookup.
+- `get_current_user` (`auth.py`) gains a branch: if the `Authorization: Bearer` value starts with `qa_live_`, resolve it against `api_keys` (hash compare) → return the same `CurrentUser(user_id, email)` dataclass. Every downstream owner check is unchanged.
+- **Scope minimal:** a deploy token may only call `POST /runs` and `GET /runs/{id}`. No destructive verbs, no analyst (cost control).
+- UI: Settings → "CI / Deploy tokens" → Generate / Revoke.
+
+### Phase 1 — Trigger via CI (smallest cut that ships value)
+
+Requires one new optional field on `RunRequest`: **`target_url`** — overrides the spec base URL at execution time so the run hits the preview/deploy URL. ~1 day of work.
+
+The user adds a step to their own pipeline. We publish a reusable **GitHub Action** plus a cURL snippet for everything else (GitLab, CircleCI):
+
+```yaml
+# in the user's .github/workflows/deploy.yml
+- name: Steadra QA scan
+  uses: steadra/scan-action@v1
+  with:
+    api-key:    ${{ secrets.STEADRA_TOKEN }}
+    product-id: prod_abc123
+    target-url: ${{ steps.deploy.outputs.url }}   # the preview URL
+    wait:       true        # block until verdict
+    fail-on:    high        # exit 1 if any high-severity scenario fails
+```
+
+The action does `POST /runs`, polls `GET /runs/{id}` until `done|failed`, then sets the process exit code. For the developer this becomes a **PR status check** ("Steadra: 12/13 passed ✅") — the form devs already expect.
+
+### Phase 2 — Native deploy webhook (zero CI config for the user)
+
+For users without their own pipeline (Vercel/Netlify, common at agencies):
+
+- New endpoint `POST /hooks/deploy/{provider}` (`provider ∈ vercel|netlify`), public but protected by the provider's payload **signature** plus a `?token=` mapping to a product.
+- The user pastes the webhook URL into Vercel/Netlify → "Deploy succeeded".
+- The webhook payload carries the **deployment URL** → used as `target_url`. This tests the exact preview of each PR/deploy, not just production.
+- Mapping table `deploy_hooks` (`token → product_id, user_id, branch_filter`).
+
+### Phase 3 — Result delivery (where retention is born)
+
+A finished run must reach a human or the feature is invisible:
+- **GitHub commit status / PR comment** (via GitHub App or token) — highest value: "Steadra ❌ checkout_flow failed on preview".
+- **Slack / email** — reuses the Resend integration already wired in `api.py` (`_send_quota_email` shows the pattern).
+
+### Phase 4 — Guard-rails (mandatory, not optional)
+
+These must be designed from the start, or deploy-triggered runs silently burn the monthly quota and LLM budget:
+1. **Debounce.** 10 rapid deploys → 1 run, not 10. Cancel the in-flight run for a product when a new deploy arrives (`POST /runs/{id}/cancel` already exists).
+2. **Quota.** Deploy-triggered runs consume `runs_per_month` (§ Tier Enforcement) → an active user can exhaust it in hours. Mitigations: (a) `branch_filter` (e.g. only `main`/`production`), (b) a separate "CI runs" counter, (c) warn when <5 runs remain.
+3. **Preview vs production.** Per-product config: scan every preview, or production deploys only. Default: production only (cost control).
+
+### Build order
+
+| # | Build | Effort | Why this order |
+|---|---|---|---|
+| 1 | API keys (Phase 0) | M | Blocks everything |
+| 2 | `target_url` override on `RunRequest` | S | Needed for preview testing; small |
+| 3 | GitHub Action + cURL doc (Phase 1) | S–M | Smallest cut that delivers value |
+| 4 | Debounce + quota guard (Phase 4 partial) | S | Before real traffic |
+| 5 | Result → PR status / Slack (Phase 3) | M | Makes the feature visible = retention |
+| 6 | Vercel/Netlify webhook (Phase 2) | M | Covers users without CI |
+
+**Minimum viable cut = steps 1+2+3:** a token, a GitHub Action, and a URL override. With those, a developer wires a scan into their pipeline in an afternoon and gets a pass/fail verdict on every deploy.
+
+---
+
 ## Authentication
 
 qa-agent is multi-tenant. Every product, spec, and job belongs to exactly one user, and the API enforces ownership on every request. Authentication is built on **Supabase Auth**; the design is structured to keep vendor lock-in bounded so the auth provider can be swapped (Clerk, Auth0, custom) in 1–2 days if needed.

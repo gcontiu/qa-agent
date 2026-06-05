@@ -180,6 +180,17 @@ async def mark_scan_email_sent(id: str) -> None:
         )
 
 
+async def mark_beta_requested(id: str) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE growth.waitlist
+               SET invite_status='requested', beta_requested_at=now()
+               WHERE id=$1::uuid AND invite_status='none'""",
+            id,
+        )
+
+
 async def mark_invite_sent(id: str) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -241,4 +252,5 @@ def _row_to_entry(row: dict) -> WaitlistEntry:
         invite_status=row["invite_status"],
         invite_sent_at=row.get("invite_sent_at"),
         invite_user_id=row.get("invite_user_id"),
+        beta_requested_at=row.get("beta_requested_at"),
     )

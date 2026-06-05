@@ -22,9 +22,10 @@ function ScanBadge({ status }: { status: string }) {
 
 function InviteBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    none:     'text-slate-600 bg-slate-500/5 border-slate-700',
-    sent:     'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
-    accepted: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+    none:      'text-slate-600 bg-slate-500/5 border-slate-700',
+    requested: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+    sent:      'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
+    accepted:  'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
   }
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full border ${map[status] ?? map.none}`}>

@@ -39,9 +39,10 @@ class WaitlistEntry(BaseModel):
     scan_cost_usd: float | None
     scan_email_sent_at: datetime | None
 
-    invite_status: str  # none|sent|accepted
+    invite_status: str  # none|requested|sent|accepted
     invite_sent_at: datetime | None
     invite_user_id: str | None
+    beta_requested_at: datetime | None = None
 
 
 class EmailCheckResult(BaseModel):

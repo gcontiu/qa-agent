@@ -143,7 +143,7 @@ def make_router(
         if not row:
             raise HTTPException(404, "Not found")
         entry = db_waitlist._row_to_entry(row)
-        if entry.invite_status != "none":
+        if entry.invite_status not in ("none", "requested"):
             raise HTTPException(409, f"Already {entry.invite_status}")
 
         supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")

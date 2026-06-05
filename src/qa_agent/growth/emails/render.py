@@ -93,9 +93,13 @@ def render_mini_scan_results(
     segment: str | None,
 ) -> tuple[str, str]:
     """Returns (subject, html)."""
+    from ..tokens import make_claim_token
     domain = _domain(entry.url)
     n = len(result.issues)
     subject = f"Your site looks clean ✓ — {domain}" if n == 0 else f"We found {n} issue{'s' if n != 1 else ''} on {domain}"
+    app_url = os.getenv("APP_URL", "https://steadra.dev").rstrip("/")
+    token = make_claim_token(entry.id)
+    claim_url = f"{app_url}/claim-beta?token={token}"
     tmpl = _env.get_template("mini_scan_results.html")
     html = tmpl.render(
         email=entry.email,
@@ -104,5 +108,6 @@ def render_mini_scan_results(
         result=result,
         segment=segment or "default",
         n=n,
+        claim_url=claim_url,
     )
     return subject, html

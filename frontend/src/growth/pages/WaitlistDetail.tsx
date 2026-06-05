@@ -56,7 +56,7 @@ export default function WaitlistDetail() {
   })
 
   const inviteStatus = data?.entry.invite_status ?? 'none'
-  const canInvite = inviteStatus === 'none'
+  const canInvite = inviteStatus === 'none' || inviteStatus === 'requested'
   const canSeed = inviteStatus === 'accepted' && !!data?.entry.invite_user_id
 
   return (
@@ -87,10 +87,17 @@ export default function WaitlistDetail() {
             size="sm"
             onClick={() => invite.mutate()}
             disabled={!canInvite || invite.isPending}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40"
+            className={
+              inviteStatus === 'requested'
+                ? 'bg-amber-500 hover:bg-amber-400 text-black disabled:opacity-40'
+                : 'bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40'
+            }
           >
             <Send className="w-3 h-3 mr-1.5" />
-            {inviteStatus === 'sent' ? 'Invite sent' : inviteStatus === 'accepted' ? 'Accepted' : 'Send invite'}
+            {inviteStatus === 'sent' ? 'Invite sent'
+              : inviteStatus === 'accepted' ? 'Accepted'
+              : inviteStatus === 'requested' ? 'Approve & send invite'
+              : 'Send invite'}
           </Button>
           {canSeed && (
             <Button

@@ -12,6 +12,7 @@ import SpecEditorPage from '@/pages/SpecEditorPage'
 import RunsPage from '@/pages/RunsPage'
 import RunDetailPage from '@/pages/RunDetailPage'
 import SetPasswordPage from '@/pages/SetPasswordPage'
+import BetaClaimPage from '@/pages/BetaClaimPage'
 import { AdminGrowthRoutes } from '@/growth/routes'
 
 const queryClient = new QueryClient({
@@ -28,6 +29,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/claim-beta" element={<BetaClaimPage />} />
             <Route
               path="/set-password"
               element={

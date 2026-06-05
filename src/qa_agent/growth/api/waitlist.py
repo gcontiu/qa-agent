@@ -1,6 +1,7 @@
-"""Public POST /waitlist endpoint."""
+"""Public POST /waitlist and GET /growth/claim-beta endpoints."""
 from __future__ import annotations
 
+import os
 import re
 from typing import Callable
 
@@ -13,6 +14,7 @@ from ..db import waitlist as db_waitlist
 from ..hooks import FunnelHooks
 from ..providers.antiabuse import AntiAbuseGuard
 from ..providers.notify import NotificationProvider
+from ..tokens import verify_claim_token
 
 
 class WaitlistSubmit(BaseModel):
@@ -79,6 +81,40 @@ def make_router(
             await db_waitlist.mark_scan_capped(wid)
 
         return {"status": "ok", "id": wid}
+
+    @router.post("/growth/claim-beta")
+    async def claim_beta(token: str) -> dict:
+        """User clicks CTA in results email — registers intent, notifies founder."""
+        try:
+            wid = verify_claim_token(token)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+        row = await db_waitlist.get_by_id(wid)
+        if not row:
+            raise HTTPException(404, "Not found")
+
+        entry = db_waitlist._row_to_entry(row)
+
+        # Idempotent — if already requested/sent/accepted, just confirm
+        if entry.invite_status == "none":
+            await db_waitlist.mark_beta_requested(wid)
+            app_url = os.getenv("APP_URL", "https://steadra.dev").rstrip("/")
+            admin_link = f"{app_url}/admin/growth/waitlist/{wid}"
+            try:
+                await notify.notify(
+                    config.founder_notify_channel,
+                    f"Beta access requested: {entry.email}",
+                    {
+                        "url": entry.url or "—",
+                        "segment": entry.segment or "unknown",
+                        "approve": admin_link,
+                    },
+                )
+            except Exception:
+                pass  # notification failure must never break user flow
+
+        return {"status": "ok"}
 
     return router
 

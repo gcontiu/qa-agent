@@ -17,7 +17,7 @@ export interface WaitlistEntry {
   scan_result: ScanResult | null
   scan_cost_usd: number | null
   scan_email_sent_at: string | null
-  invite_status: 'none' | 'sent' | 'accepted'
+  invite_status: 'none' | 'requested' | 'sent' | 'accepted'
   invite_sent_at: string | null
   invite_user_id: string | null
 }

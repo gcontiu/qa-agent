@@ -1,6 +1,7 @@
 """FunnelConfig — all dials in one place."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -13,7 +14,7 @@ class FunnelConfig:
     daily_scan_cap: int = 20
     ip_rate_limit_per_hour: int = 3
     beta_duration_days: int = 30
-    mini_scan_wall_time_seconds: int = 60
+    mini_scan_wall_time_seconds: int = int(os.environ.get("QA_MINI_SCAN_WALL_TIME", "120"))
 
     drip_schedule: dict[str, timedelta] = field(default_factory=lambda: {
         "mini_scan_running":  timedelta(seconds=0),

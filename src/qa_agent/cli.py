@@ -300,6 +300,69 @@ def show_report(
     console.print(target.read_text())
 
 
+@app.command(name="miniscan")
+def miniscan(
+    url: str = typer.Argument(..., help="URL to scan (e.g. https://ascentcore.com/)"),
+    timeout: int = typer.Option(90, "--timeout", "-t", help="Wall-time cap in seconds"),
+    output: Path = typer.Option(None, "--output", "-o", help="Write JSON result to this file"),
+):
+    """Run a mini-scan on a URL and print found issues (no DB, no email)."""
+    from qa_agent.integrations.growth_hooks import QAAgentHooks
+
+    hooks = QAAgentHooks()
+    console.print(f"\n[bold]Mini-scan:[/bold] {url}  [dim](timeout {timeout}s)[/dim]\n")
+
+    try:
+        result = asyncio.run(
+            asyncio.wait_for(hooks.run_mini_scan(email="cli", url=url), timeout=timeout)
+        )
+    except asyncio.TimeoutError:
+        console.print(f"[red]Timed out[/red] after {timeout}s — site may have bot protection or be too slow.")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Scan failed:[/red] {e}")
+        raise typer.Exit(2)
+
+    sev_color = {"critical": "red", "warning": "yellow", "info": "cyan"}
+
+    if result.issues:
+        table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+        table.add_column("Severity", width=10)
+        table.add_column("Type", width=20)
+        table.add_column("Message")
+        for issue in result.issues:
+            color = sev_color.get(issue.severity, "white")
+            table.add_row(
+                f"[{color}]{issue.severity}[/{color}]",
+                issue.type,
+                issue.message,
+            )
+        console.print(table)
+    else:
+        console.print("[green]No issues found.[/green]\n")
+
+    console.print(
+        f"[dim]Pages: {result.page_count}  │  Duration: {result.duration_ms}ms"
+        f"  │  Cost: ${result.cost_usd:.4f}[/dim]\n"
+    )
+
+    if output:
+        import json
+        output.write_text(
+            json.dumps(
+                {
+                    "url": url,
+                    "issues": [i.model_dump() for i in result.issues],
+                    "page_count": result.page_count,
+                    "duration_ms": result.duration_ms,
+                    "cost_usd": result.cost_usd,
+                },
+                indent=2,
+            )
+        )
+        console.print(f"[dim]Result saved to {output}[/dim]")
+
+
 @app.command()
 def serve(
     host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),

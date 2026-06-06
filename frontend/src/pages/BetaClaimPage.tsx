@@ -11,7 +11,7 @@ export default function BetaClaimPage() {
 
   useEffect(() => {
     if (!token) { setState('error'); return }
-    fetch(`/api/growth/claim-beta?token=${encodeURIComponent(token)}`, { method: 'POST' })
+    fetch(`/growth/claim-beta?token=${encodeURIComponent(token)}`, { method: 'POST' })
       .then(r => { setState(r.ok ? 'ok' : 'error') })
       .catch(() => setState('error'))
   }, [token])

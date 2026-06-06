@@ -30,6 +30,7 @@ export default defineConfig({
       '/spec-dirs': { target: 'http://localhost:8081', changeOrigin: true },
       '/health': { target: 'http://localhost:8081', changeOrigin: true },
       '/waitlist': { target: 'http://localhost:8081', changeOrigin: true },
+      '/growth': { target: 'http://localhost:8081', changeOrigin: true },
     },
   },
 })

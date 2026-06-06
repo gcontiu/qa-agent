@@ -164,7 +164,7 @@ def make_router(
                 json={
                     "type": "magiclink",
                     "email": entry.email,
-                    "options": {"redirect_to": redirect_to},
+                    "redirect_to": redirect_to,
                 },
             )
 

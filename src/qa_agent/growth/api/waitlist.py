@@ -1,9 +1,12 @@
 """Public POST /waitlist and GET /growth/claim-beta endpoints."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -112,7 +115,7 @@ def make_router(
                     },
                 )
             except Exception:
-                pass  # notification failure must never break user flow
+                logger.warning("founder notify failed for claim_beta email=%s", entry.email, exc_info=True)
 
         return {"status": "ok"}
 

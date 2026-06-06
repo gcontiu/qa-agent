@@ -89,7 +89,7 @@ def make_router(
                 if cost_summary_obj:
                     cost_summary = cost_summary_obj.model_dump()
             except Exception:
-                pass
+                logger.warning("host/cost summary failed for user=%s", entry.invite_user_id, exc_info=True)
 
         return {
             "entry": entry.model_dump(),

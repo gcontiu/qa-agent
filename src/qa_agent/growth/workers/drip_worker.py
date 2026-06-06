@@ -115,4 +115,5 @@ class DripWorker:
             issues_found = (entry.scan_result.issues.__len__() if entry.scan_result else 0)
             return int(total_runs), issues_found, float(cost_usd)
         except Exception:
+            logger.exception("cohort stats failed for entry email=%s", entry.email)
             return 0, 0, 0.0

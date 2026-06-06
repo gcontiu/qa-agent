@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import time
 from collections import defaultdict
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 import dns.resolver  # type: ignore
 import httpx
@@ -42,7 +45,7 @@ class MXCheck:
             if records:
                 return EmailCheckResult(ok=True)
         except Exception:
-            pass
+            logger.debug("MX check failed for domain=%s", domain, exc_info=True)
         return EmailCheckResult(ok=False, reason="no_mx")
 
     async def check_ip_rate(self, ip: str) -> RateCheckResult:

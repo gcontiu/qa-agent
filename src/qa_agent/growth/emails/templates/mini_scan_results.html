@@ -76,6 +76,12 @@
       We'll follow up with an invitation to set up automated regression tests — so you catch new issues before your users do.
     </p>
 
+    {% if n == 0 %}
+    <a href="{{ claim_url }}" class="cta">Join the beta — get full QA coverage</a>
+    {% else %}
+    <a href="{{ claim_url }}" class="cta">Join the beta — fix these before they cost you</a>
+    {% endif %}
+
     {% set feature_files = result.feature_files if result.feature_files else {} %}
     {% if feature_files %}
     <div class="scenarios">
@@ -95,12 +101,6 @@
         {% endif %}
       {% endfor %}
     </div>
-    {% endif %}
-
-    {% if n == 0 %}
-    <a href="{{ claim_url }}" class="cta">Join the beta — get full QA coverage</a>
-    {% else %}
-    <a href="{{ claim_url }}" class="cta">Join the beta — fix these before they cost you</a>
     {% endif %}
 
     <div class="footer">

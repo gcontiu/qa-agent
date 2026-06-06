@@ -8,12 +8,18 @@ export default function BetaClaimPage() {
   const [params] = useSearchParams()
   const token = params.get('token')
   const [state, setState] = useState<State>('loading')
+  const [errorDetail, setErrorDetail] = useState<string>('')
 
   useEffect(() => {
-    if (!token) { setState('error'); return }
+    if (!token) { setErrorDetail('no token in URL'); setState('error'); return }
     fetch(`/growth/claim-beta?token=${encodeURIComponent(token)}`, { method: 'POST' })
-      .then(r => { setState(r.ok ? 'ok' : 'error') })
-      .catch(() => setState('error'))
+      .then(async r => {
+        if (r.ok) { setState('ok'); return }
+        const body = await r.text().catch(() => '')
+        setErrorDetail(`HTTP ${r.status}: ${body.slice(0, 200)}`)
+        setState('error')
+      })
+      .catch(err => { setErrorDetail(String(err)); setState('error') })
   }, [token])
 
   return (
@@ -57,6 +63,9 @@ export default function BetaClaimPage() {
               This link may have expired (valid for 7 days) or already been used.
               If you think this is a mistake, reply to the email you received and we'll sort it out.
             </p>
+            {errorDetail && (
+              <p className="text-xs text-gray-600 font-mono break-all">{errorDetail}</p>
+            )}
           </>
         )}
 

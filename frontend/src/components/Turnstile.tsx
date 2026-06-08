@@ -50,14 +50,23 @@ export default function Turnstile({ siteKey, onVerify, onExpire, className }: Tu
   const containerRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef<string | undefined>(undefined)
 
+  // Keep latest callbacks in refs so the render effect below only depends on
+  // siteKey — otherwise inline arrow functions from the parent (a new
+  // reference on every render) would tear down and re-render the widget on
+  // every keystroke, producing the flickering "Verifying…" seen on mobile.
+  const onVerifyRef = useRef(onVerify)
+  const onExpireRef = useRef(onExpire)
+  useEffect(() => { onVerifyRef.current = onVerify }, [onVerify])
+  useEffect(() => { onExpireRef.current = onExpire }, [onExpire])
+
   useEffect(() => {
     let cancelled = false
     loadScript().then(() => {
       if (cancelled || !containerRef.current || !window.turnstile) return
       widgetIdRef.current = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
-        callback: onVerify,
-        'expired-callback': onExpire,
+        callback: (token) => onVerifyRef.current(token),
+        'expired-callback': () => onExpireRef.current?.(),
         theme: 'dark',
       })
     }).catch(() => { /* widget stays empty; backend still enforces if configured */ })
@@ -68,7 +77,7 @@ export default function Turnstile({ siteKey, onVerify, onExpire, className }: Tu
         window.turnstile.remove(widgetIdRef.current)
       }
     }
-  }, [siteKey, onVerify, onExpire])
+  }, [siteKey])
 
   return <div ref={containerRef} className={className} />
 }

@@ -8,7 +8,7 @@ primary_region = "iad"  # US East (Virginia) — same region as Browserbase us-e
   [build.args]
     # Public Turnstile site key (safe to commit — the secret half is
     # TURNSTILE_SECRET, set via `fly secrets set` and used server-side only).
-    VITE_TURNSTILE_SITE_KEY = ""
+    VITE_TURNSTILE_SITE_KEY = "0x4AAAAAADgzTKtTD2C0QaO_"
 
 [env]
   PORT = "8080"

@@ -46,11 +46,13 @@ def make_router(
 
         remote_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "0.0.0.0").split(",")[0].strip()
 
-        # Anti-abuse checks
-        if entry.turnstile_token:
-            ok = await antiabuse.verify_token(entry.turnstile_token, remote_ip)
-            if not ok:
-                raise HTTPException(422, "Bot check failed")
+        # Anti-abuse checks. verify_token is a no-op (always True) unless a
+        # TurnstileGuard is in the chain, so this only enforces when Turnstile
+        # is actually configured server-side — and an empty token then fails
+        # the check, closing the "just omit the token" bypass.
+        ok = await antiabuse.verify_token(entry.turnstile_token or "", remote_ip)
+        if not ok:
+            raise HTTPException(422, "Bot check failed")
 
         email_check = await antiabuse.check_email(email)
         if not email_check.ok:

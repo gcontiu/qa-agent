@@ -91,7 +91,7 @@ export default function ProductsPage() {
       ) : products.length === 0 ? (
         <div className="border border-white/10 rounded-lg p-12 text-center text-gray-400">
           <p className="mb-4">No products yet.</p>
-          <Button variant="outline" onClick={() => setOpen(true)} className="border-white/20 text-gray-300 hover:bg-white/10 hover:text-white">
+          <Button variant="outline" onClick={() => setOpen(true)} className="bg-transparent border-white/20 text-gray-300 hover:bg-white/10 hover:text-white">
             <Plus className="h-4 w-4 mr-2" />
             Add your first product
           </Button>

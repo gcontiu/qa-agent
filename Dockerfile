@@ -35,6 +35,12 @@ RUN if [ "$INSTALL_CHROMIUM" = "true" ]; then \
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN cd frontend && npm ci
 
+# Public Turnstile site key — baked into the bundle at build time (it's not a
+# secret; the matching TURNSTILE_SECRET stays a Fly runtime secret, used only
+# server-side to verify tokens).
+ARG VITE_TURNSTILE_SITE_KEY=""
+ENV VITE_TURNSTILE_SITE_KEY=$VITE_TURNSTILE_SITE_KEY
+
 COPY frontend/ ./frontend/
 RUN cd frontend && npm run build
 

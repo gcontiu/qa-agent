@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, Zap, ListChecks, Moon, Check, ChevronDown, ChevronUp, User } from 'lucide-react'
 import { useAuth } from '@/contexts/auth'
+import Turnstile from '@/components/Turnstile'
 import logo4 from '@/assets/logo4.png'
+
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined
 
 const SPOTS_TOTAL = 50
 const SPOTS_CLAIMED = 27
@@ -67,21 +70,33 @@ export default function LandingPage() {
   const [segment, setSegment] = useState(0)
   const [openFaq, setOpenFaq] = useState<number | null>(null)
   const [submittedUrl, setSubmittedUrl] = useState('')
+  const [turnstileToken, setTurnstileToken] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!email || !url) return
+    if (TURNSTILE_SITE_KEY && !turnstileToken) {
+      setErrorMsg('Please complete the verification check.')
+      setStatus('error')
+      return
+    }
     setStatus('loading')
     setErrorMsg('')
     try {
       const res = await fetch('/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, url }),
+        body: JSON.stringify({ email, url, turnstile_token: turnstileToken || undefined }),
       })
       if (res.status === 409) {
         setErrorMsg("You're already on the list.")
         setStatus('error')
+        return
+      }
+      if (res.status === 422) {
+        setErrorMsg('Verification failed. Please try again.')
+        setStatus('error')
+        setTurnstileToken('')
         return
       }
       if (!res.ok) throw new Error()
@@ -90,6 +105,7 @@ export default function LandingPage() {
     } catch {
       setErrorMsg('Something went wrong. Try again.')
       setStatus('error')
+      setTurnstileToken('')
     }
   }
 
@@ -176,7 +192,7 @@ export default function LandingPage() {
                   />
                   <button
                     type="submit"
-                    disabled={status === 'loading'}
+                    disabled={status === 'loading' || (!!TURNSTILE_SITE_KEY && !turnstileToken)}
                     className="px-5 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-semibold text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2 whitespace-nowrap"
                   >
                     {status === 'loading'
@@ -185,6 +201,14 @@ export default function LandingPage() {
                     }
                   </button>
                 </div>
+                {TURNSTILE_SITE_KEY && (
+                  <Turnstile
+                    siteKey={TURNSTILE_SITE_KEY}
+                    onVerify={setTurnstileToken}
+                    onExpire={() => setTurnstileToken('')}
+                    className="self-start"
+                  />
+                )}
               </form>
             )}
             {status === 'error' && (

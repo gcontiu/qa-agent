@@ -5,6 +5,10 @@ app = "qa-agent-sp"
 primary_region = "iad"  # US East (Virginia) — same region as Browserbase us-east-1
 
 [build]
+  [build.args]
+    # Public Turnstile site key (safe to commit — the secret half is
+    # TURNSTILE_SECRET, set via `fly secrets set` and used server-side only).
+    VITE_TURNSTILE_SITE_KEY = ""
 
 [env]
   PORT = "8080"

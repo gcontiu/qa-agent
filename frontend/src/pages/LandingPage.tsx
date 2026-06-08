@@ -123,7 +123,7 @@ export default function LandingPage() {
       </nav>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="pt-24 pb-12 px-6 text-center">
+      <section className="pt-16 sm:pt-24 pb-12 px-6 text-center">
         <div className="max-w-3xl mx-auto">
 
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-xs font-medium mb-8">
@@ -131,7 +131,7 @@ export default function LandingPage() {
             Closed beta · {SPOTS_CLAIMED} of {SPOTS_TOTAL} spots claimed this month
           </div>
 
-          <h1 className="text-5xl sm:text-6xl font-bold leading-tight tracking-tight mb-4">
+          <h1 className="text-4xl sm:text-6xl font-bold leading-tight tracking-tight mb-4">
             Your on-demand<br />
             <span className="text-cyan-400">QA junior.</span>
           </h1>
@@ -142,7 +142,7 @@ export default function LandingPage() {
           </p>
 
           {/* Segmentation chips */}
-          <div className="flex items-center justify-center gap-2 mb-3">
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
             {SEGMENTS.map((s, i) => (
               <button
                 key={s.label}
@@ -157,7 +157,7 @@ export default function LandingPage() {
               </button>
             ))}
           </div>
-          <p className="text-sm text-gray-500 mb-10 max-w-xl mx-auto min-h-[1.25rem]">
+          <p className="text-sm text-gray-400 mb-10 max-w-xl mx-auto min-h-[1.25rem]">
             {SEGMENTS[segment].tagline}
           </p>
 
@@ -179,7 +179,7 @@ export default function LandingPage() {
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   placeholder="you@company.com"
-                  className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-gray-600 focus:outline-none focus:border-cyan-500/50 text-sm"
+                  className="w-full px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder:text-gray-400 focus:outline-none focus:border-cyan-400 text-sm"
                 />
                 <div className="flex flex-col sm:flex-row gap-3">
                   <input
@@ -188,7 +188,7 @@ export default function LandingPage() {
                     value={url}
                     onChange={e => setUrl(e.target.value)}
                     placeholder="https://yoursite.com"
-                    className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-gray-600 focus:outline-none focus:border-cyan-500/50 text-sm"
+                    className="flex-1 px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder:text-gray-400 focus:outline-none focus:border-cyan-400 text-sm"
                   />
                   <button
                     type="submit"
@@ -215,7 +215,7 @@ export default function LandingPage() {
               <p className="text-red-400 text-xs mt-2 text-left">{errorMsg}</p>
             )}
             {status !== 'success' && (
-              <p className="text-xs text-gray-700 mt-3">
+              <p className="text-xs text-gray-500 mt-3">
                 We only scan public pages. No login required. Report is private to you.
               </p>
             )}
@@ -228,40 +228,40 @@ export default function LandingPage() {
       <section className="pb-20 px-6">
         <div className="max-w-5xl mx-auto">
           <div className="rounded-xl border border-white/10 bg-[#0d1024] overflow-hidden shadow-2xl">
-            <div className="border-b border-white/5 px-5 py-3 flex items-center gap-3">
-              <div className="flex gap-1.5">
+            <div className="border-b border-white/5 px-4 sm:px-5 py-3 flex items-center gap-3">
+              <div className="hidden sm:flex gap-1.5 shrink-0">
                 <span className="w-3 h-3 rounded-full bg-white/10" />
                 <span className="w-3 h-3 rounded-full bg-white/10" />
                 <span className="w-3 h-3 rounded-full bg-white/10" />
               </div>
-              <span className="text-xs text-gray-600 font-mono">Steadra · Run #demo · example-shop.com</span>
-              <span className="ml-auto text-xs text-red-400 font-medium">8 issues found</span>
+              <span className="text-xs text-gray-400 font-mono truncate min-w-0">Steadra · Run #demo · example-shop.com</span>
+              <span className="ml-auto text-xs text-red-400 font-medium shrink-0">8 issues found</span>
             </div>
             <div className="divide-y divide-white/[0.03]">
               {MOCK_ISSUES.map((issue, i) => (
-                <div key={i} className="px-5 py-3.5 flex items-start gap-3">
+                <div key={i} className="px-4 sm:px-5 py-3.5 flex items-start gap-3">
                   <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${issue.sev === 'error' ? 'bg-red-500' : 'bg-yellow-500/80'}`} />
                   <div className="min-w-0">
                     <span className={`text-xs font-medium mr-2 ${issue.sev === 'error' ? 'text-red-400' : 'text-yellow-400'}`}>{issue.type}</span>
                     <span className="text-xs text-gray-400 break-all">{issue.msg}</span>
-                    <p className="text-xs text-gray-700 mt-0.5 font-mono">{issue.loc}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 font-mono">{issue.loc}</p>
                   </div>
                 </div>
               ))}
             </div>
-            <div className="border-t border-white/5 px-5 py-3 flex items-center justify-between">
-              <span className="text-xs text-gray-700">Scan completed in 1m 42s · 12 pages crawled</span>
-              <span className="text-xs text-cyan-700 font-medium">Generated by Steadra</span>
+            <div className="border-t border-white/5 px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <span className="text-xs text-gray-500">Scan completed in 1m 42s · 12 pages crawled</span>
+              <span className="text-xs text-cyan-500 font-medium">Generated by Steadra</span>
             </div>
           </div>
-          <p className="text-center text-xs text-gray-700 mt-4">Sample report — your site, your actual issues.</p>
+          <p className="text-center text-xs text-gray-500 mt-4">Sample report — your site, your actual issues.</p>
         </div>
       </section>
 
       {/* ── How it works ─────────────────────────────────────────────────── */}
-      <section className="py-20 px-6 border-t border-white/5">
+      <section className="py-14 sm:py-20 px-6 border-t border-white/5">
         <div className="max-w-5xl mx-auto">
-          <p className="text-center text-xs text-gray-600 uppercase tracking-widest mb-3">How it works</p>
+          <p className="text-center text-xs text-gray-400 uppercase tracking-widest mb-3">How it works</p>
           <h2 className="text-center text-2xl font-semibold mb-14">
             From zero to bug report in minutes
           </h2>
@@ -294,11 +294,11 @@ export default function LandingPage() {
                   <div className="flex items-center justify-center w-8 h-8 rounded-md bg-cyan-500/10 shrink-0">
                     {icon}
                   </div>
-                  <span className="text-xs text-gray-700 font-mono">{step}</span>
+                  <span className="text-xs text-gray-500 font-mono">{step}</span>
                 </div>
                 <h3 className="text-base font-semibold mb-2">{title}</h3>
-                <p className="text-sm text-gray-500 leading-relaxed flex-1">{body}</p>
-                <p className="text-xs text-cyan-600 mt-4 font-medium">{tag}</p>
+                <p className="text-sm text-gray-400 leading-relaxed flex-1">{body}</p>
+                <p className="text-xs text-cyan-400 mt-4 font-medium">{tag}</p>
               </div>
             ))}
           </div>
@@ -306,7 +306,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Founder note ─────────────────────────────────────────────────── */}
-      <section className="py-20 px-6 border-t border-white/5">
+      <section className="py-14 sm:py-20 px-6 border-t border-white/5">
         <div className="max-w-2xl mx-auto text-center">
           {/* TODO: replace icon with <img src="/founder.jpg" ... /> when ready */}
           <div className="w-16 h-16 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center mx-auto mb-6">
@@ -325,11 +325,11 @@ export default function LandingPage() {
       </section>
 
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
-      <section className="py-20 px-6 border-t border-white/5">
+      <section className="py-14 sm:py-20 px-6 border-t border-white/5">
         <div className="max-w-5xl mx-auto text-center">
-          <p className="text-xs text-gray-600 uppercase tracking-widest mb-3">Pricing</p>
+          <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Pricing</p>
           <h2 className="text-2xl font-semibold mb-2">Simple, transparent tiers</h2>
-          <p className="text-gray-600 text-sm mb-12">Available at launch. Beta cohort gets locked-in pricing — pay nothing during your 30-day trial.</p>
+          <p className="text-gray-400 text-sm mb-12">Available at launch. Beta cohort gets locked-in pricing — pay nothing during your 30-day trial.</p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-3xl mx-auto">
             {[
@@ -389,14 +389,14 @@ export default function LandingPage() {
                     Recommended
                   </span>
                 )}
-                <p className="text-xs text-gray-600 mb-2">{description}</p>
+                <p className="text-xs text-gray-400 mb-2">{description}</p>
                 <p className="text-2xl font-bold mb-1">{price}</p>
                 <p className="text-sm font-medium mb-5">{name}</p>
                 <ul className="space-y-2.5 flex-1">
                   {features.map(f => (
                     <li key={f.label} className="flex items-start gap-2.5 text-xs">
-                      <Check className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${f.highlight ? 'text-cyan-400' : 'text-gray-600'}`} />
-                      <span className={f.highlight ? 'text-cyan-400 font-medium' : 'text-gray-500'}>{f.label}</span>
+                      <Check className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${f.highlight ? 'text-cyan-400' : 'text-gray-500'}`} />
+                      <span className={f.highlight ? 'text-cyan-400 font-medium' : 'text-gray-300'}>{f.label}</span>
                     </li>
                   ))}
                 </ul>
@@ -414,9 +414,9 @@ export default function LandingPage() {
       </section>
 
       {/* ── FAQ ──────────────────────────────────────────────────────────── */}
-      <section className="py-20 px-6 border-t border-white/5">
+      <section className="py-14 sm:py-20 px-6 border-t border-white/5">
         <div className="max-w-2xl mx-auto">
-          <p className="text-center text-xs text-gray-600 uppercase tracking-widest mb-3">FAQ</p>
+          <p className="text-center text-xs text-gray-400 uppercase tracking-widest mb-3">FAQ</p>
           <h2 className="text-center text-2xl font-semibold mb-10">Common questions</h2>
           <div className="space-y-2">
             {FAQS.map((faq, i) => (
@@ -433,7 +433,7 @@ export default function LandingPage() {
                 </button>
                 {openFaq === i && (
                   <div className="px-5 pb-4">
-                    <p className="text-sm text-gray-500 leading-relaxed">{faq.a}</p>
+                    <p className="text-sm text-gray-400 leading-relaxed">{faq.a}</p>
                   </div>
                 )}
               </div>
@@ -444,12 +444,12 @@ export default function LandingPage() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="py-10 px-6 border-t border-white/5">
-        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-700">
-          <span className="font-semibold text-gray-500">Steadra</span>
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
+          <span className="font-semibold text-gray-300">Steadra</span>
           <div className="flex items-center gap-5">
-            <a href="/privacy" className="hover:text-gray-400 transition-colors">Privacy</a>
-            <a href="/terms" className="hover:text-gray-400 transition-colors">Terms</a>
-            <a href="mailto:hello@steadra.dev" className="hover:text-gray-400 transition-colors">hello@steadra.dev</a>
+            <a href="/privacy" className="hover:text-gray-300 transition-colors">Privacy</a>
+            <a href="/terms" className="hover:text-gray-300 transition-colors">Terms</a>
+            <a href="mailto:hello@steadra.dev" className="hover:text-gray-300 transition-colors">hello@steadra.dev</a>
           </div>
           <span>© 2026 Steadra · steadra.dev</span>
         </div>
